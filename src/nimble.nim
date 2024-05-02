@@ -78,7 +78,7 @@ proc processFreeDependenciesSAT(rootPkgInfo: PackageInfo, options: Options): Has
     return satProccesedPackages
   var solvedPkgs = newSeq[SolvedPackage]()
   var pkgsToInstall: seq[(string, Version)] = @[]
-  var pkgList = initPkgList(rootPkgInfo, options)
+  var pkgList = initPkgList(rootPkgInfo, options).mapIt(it.toFullInfo(options))
   var allPkgsInfo: seq[PackageInfo] = pkgList & rootPkgInfo
   var rootPkgInfo = rootPkgInfo
   #Replace requirements so they are updated as needed 
