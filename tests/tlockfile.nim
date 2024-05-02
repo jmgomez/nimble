@@ -234,8 +234,8 @@ requires "nim >= 1.5.1"
   proc getRevision(dep: string, lockFileName = defaultLockFileName): string =
     result = lockFileName.readFile.parseJson{$lfjkPackages}{dep}{$lfjkPkgVcsRevision}.str
 
-  proc addAdditionalFileAndPushToRemote*(
-      repoPath, remoteName, remotePath, fileContent: string) =
+  proc addAdditionalFileAndPushToRemote(
+      repoPath, remoteName, remotePath, fileContent: string) {.used.}=
     cdNewDir remotePath:
       initRepo(isBare = true)
     cd repoPath:
