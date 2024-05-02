@@ -5,10 +5,11 @@
 
 import unittest, strutils, os, strformat
 import testscommon
+when not defined linux:
+  from nimblepkg/displaymessages import cannotUninstallPkgMsg
+  from nimblepkg/version import newVersion
 
-from nimblepkg/displaymessages import cannotUninstallPkgMsg
 from nimblepkg/common import cd
-from nimblepkg/version import newVersion
 
 suite "uninstall":
   test "cannot install packagebin2 in --offline mode":
