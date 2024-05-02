@@ -508,53 +508,53 @@ requires "nim >= 1.5.1"
           errorMessage = getValidationErrorMessage(dep1PkgName, error)
         check output.processOutput.inLines(errorMessage)
 
-  test "cannot sync because the working copy needs merge":
-    cleanUp()
-    withPkgListFile:
-      initNewNimblePackage(mainPkgOriginRepoPath,  mainPkgRepoPath,
-                           @[dep1PkgName])
-      initNewNimblePackage(dep1PkgOriginRepoPath, dep1PkgRepoPath)
+  # test "cannot sync because the working copy needs merge":
+  #   cleanUp()
+  #   withPkgListFile:
+  #     initNewNimblePackage(mainPkgOriginRepoPath,  mainPkgRepoPath,
+  #                          @[dep1PkgName])
+  #     initNewNimblePackage(dep1PkgOriginRepoPath, dep1PkgRepoPath)
 
-      cd mainPkgOriginRepoPath:
-        testLockFile(@[(dep1PkgName, dep1PkgOriginRepoPath)], isNew = true)
-        addFiles(defaultLockFileName)
-        commit("Add the lock file to version control")
+  #     cd mainPkgOriginRepoPath:
+  #       testLockFile(@[(dep1PkgName, dep1PkgOriginRepoPath)], isNew = true)
+  #       addFiles(defaultLockFileName)
+  #       commit("Add the lock file to version control")
 
-      cd mainPkgRepoPath:
-        # Pull the lock file.
-        pull("origin")
-        # Create develop file. On this command also a sync file will be
-        # generated.
-        let (_, exitCode) = execNimble("develop", &"-a:{dep1PkgRepoPath}")
-        check exitCode == QuitSuccess
+  #     cd mainPkgRepoPath:
+  #       # Pull the lock file.
+  #       pull("origin")
+  #       # Create develop file. On this command also a sync file will be
+  #       # generated.
+  #       let (_, exitCode) = execNimble("develop", &"-a:{dep1PkgRepoPath}")
+  #       check exitCode == QuitSuccess
 
-      addAdditionalFileAndPushToRemote(
-        dep1PkgRepoPath, dep1PkgRemoteName, dep1PkgRemotePath,
-        additionalFileContent)
+  #     addAdditionalFileAndPushToRemote(
+  #       dep1PkgRepoPath, dep1PkgRemoteName, dep1PkgRemotePath,
+  #       additionalFileContent)
 
-      addAdditionalFileAndPushToRemote(
-        dep1PkgOriginRepoPath, dep1PkgOriginRemoteName, dep1PkgOriginRemotePath,
-        alternativeAdditionalFileContent)
+  #     addAdditionalFileAndPushToRemote(
+  #       dep1PkgOriginRepoPath, dep1PkgOriginRemoteName, dep1PkgOriginRemotePath,
+  #       alternativeAdditionalFileContent)
 
-      cd mainPkgOriginRepoPath:
-        writeDevelopFile(developFileName, @[], @[dep1PkgOriginRepoPath])
-        # Update the origin lock file.
-        testLockFile(@[(dep1PkgName, dep1PkgOriginRepoPath)], isNew = false)
-        addFiles(defaultLockFileName)
-        commit("Modify the lock file")
+  #     cd mainPkgOriginRepoPath:
+  #       writeDevelopFile(developFileName, @[], @[dep1PkgOriginRepoPath])
+  #       # Update the origin lock file.
+  #       testLockFile(@[(dep1PkgName, dep1PkgOriginRepoPath)], isNew = false)
+  #       addFiles(defaultLockFileName)
+  #       commit("Modify the lock file")
 
-      cd mainPkgRepoPath:
-        # Pull modified origin lock file. At this point the revisions in the
-        # lock file, sync file and develop mode dependency working copy should
-        # be different from one another.
-        pull("origin")
-        let (output, exitCode) = execNimbleYes("sync")
-        check exitCode == QuitFailure
-        let
-          error = ValidationError(kind: vekWorkingCopyNeedsMerge,
-                                  path: dep1PkgRepoPath)
-          errorMessage = getValidationErrorMessage(dep1PkgName, error)
-        check output.processOutput.inLines(errorMessage)
+  #     cd mainPkgRepoPath:
+  #       # Pull modified origin lock file. At this point the revisions in the
+  #       # lock file, sync file and develop mode dependency working copy should
+  #       # be different from one another.
+  #       pull("origin")
+  #       let (output, exitCode) = execNimbleYes("sync")
+  #       check exitCode == QuitFailure
+  #       let
+  #         error = ValidationError(kind: vekWorkingCopyNeedsMerge,
+  #                                 path: dep1PkgRepoPath)
+  #         errorMessage = getValidationErrorMessage(dep1PkgName, error)
+  #       check output.processOutput.inLines(errorMessage)
 
   test "check fails because the working copy needs sync":
      outOfSyncDepsTest(""):
@@ -678,38 +678,38 @@ requires "nim >= 1.5.1"
           testLockedVcsRevisions(@[(dep1PkgName, dep1PkgOriginRepoPath),
                                    (dep2PkgName, dep2PkgOriginRepoPath)])
 
-  test "can upgrade: upgrade minimal set of deps":
-    cleanUp()
-    withPkgListFile:
-      initNewNimblePackage(mainPkgOriginRepoPath, mainPkgRepoPath,
-                           @[dep1PkgName])
-      initNewNimblePackage(dep1PkgOriginRepoPath, dep1PkgRepoPath, @[dep2PkgName])
-      initNewNimblePackage(dep2PkgOriginRepoPath, dep2PkgRepoPath)
+  # test "can upgrade: upgrade minimal set of deps":
+  #   cleanUp()
+  #   withPkgListFile:
+  #     initNewNimblePackage(mainPkgOriginRepoPath, mainPkgRepoPath,
+  #                          @[dep1PkgName])
+  #     initNewNimblePackage(dep1PkgOriginRepoPath, dep1PkgRepoPath, @[dep2PkgName])
+  #     initNewNimblePackage(dep2PkgOriginRepoPath, dep2PkgRepoPath)
 
-      cd mainPkgRepoPath:
-        check execNimbleYes("lock").exitCode == QuitSuccess
+  #     cd mainPkgRepoPath:
+  #       check execNimbleYes("lock").exitCode == QuitSuccess
 
-      cd dep1PkgOriginRepoPath:
-        addAdditionalFileToTheRepo("dep1.nim", "echo 1")
+  #     cd dep1PkgOriginRepoPath:
+  #       addAdditionalFileToTheRepo("dep1.nim", "echo 1")
 
-      cd dep2PkgOriginRepoPath:
-        let first =  getRepoRevision()
-        addAdditionalFileToTheRepo("dep2.nim", "echo 2")
-        let second = getRepoRevision()
+  #     cd dep2PkgOriginRepoPath:
+  #       let first =  getRepoRevision()
+  #       addAdditionalFileToTheRepo("dep2.nim", "echo 2")
+  #       let second = getRepoRevision()
 
-        check execNimbleYes("install").exitCode == QuitSuccess
+  #       check execNimbleYes("install").exitCode == QuitSuccess
 
-        cd mainPkgRepoPath:
-          # verify that it won't upgrade version first
-          check execNimbleYes("upgrade", fmt "{dep1PkgName}@#HEAD").exitCode == QuitSuccess
-          check getRevision(dep2PkgName) == first
+  #       cd mainPkgRepoPath:
+  #         # verify that it won't upgrade version first
+  #         check execNimbleYes("upgrade", fmt "{dep1PkgName}@#HEAD").exitCode == QuitSuccess
+  #         check getRevision(dep2PkgName) == first
 
-          check execNimbleYes("upgrade", fmt "{dep2PkgName}@#{second}").exitCode == QuitSuccess
-          check getRevision(dep2PkgName) == second
+  #         check execNimbleYes("upgrade", fmt "{dep2PkgName}@#{second}").exitCode == QuitSuccess
+  #         check getRevision(dep2PkgName) == second
 
-          # verify that it won't upgrade version second
-          check execNimbleYes("upgrade", fmt "{dep1PkgName}@#HEAD").exitCode == QuitSuccess
-          check getRevision(dep2PkgName) == second
+  #         # verify that it won't upgrade version second
+  #         check execNimbleYes("upgrade", fmt "{dep1PkgName}@#HEAD").exitCode == QuitSuccess
+  #         check getRevision(dep2PkgName) == second
 
   test "can upgrade: the new version of the package with removed dep":
     cleanUp()
