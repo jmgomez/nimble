@@ -80,14 +80,18 @@ proc processFreeDependenciesSAT(rootPkgInfo: PackageInfo, options: Options): Has
   var pkgsToInstall: seq[(string, Version)] = @[]
   var pkgList = initPkgList(rootPkgInfo, options).mapIt(it.toFullInfo(options))
   var allPkgsInfo: seq[PackageInfo] = pkgList & rootPkgInfo
-  var rootPkgInfo = rootPkgInfo
-  #Replace requirements so they are updated as needed 
-  if options.action.typ == actionUpgrade:
-    let toUpgradeNames = options.action.packages.mapIt(it[0])
-    pkgList = pkgList.filterIt(it.basicInfo.name notin toUpgradeNames)
+  #Remove from the pkglist the packages that exists in lock file and has a different vcsRevision
+  let toUpgradeNames = options.action.packages.mapIt(it[0])
+  var toRemoveFromLocked = newSeq[PackageInfo]()
+  if rootPkgInfo.lockedDeps.hasKey(""):
+    for name, lockedPkg in rootPkgInfo.lockedDeps[""]:
+      for pkg in pkgList:
+        if name notin toUpgradeNames and name == pkg.basicInfo.name and 
+          lockedPkg.vcsRevision != pkg.metaData.vcsRevision:
+          toRemoveFromLocked.add pkg
 
-    # rootPkgInfo.requires = rootPkgInfo.requires.filterIt(it.name notin toUpgradeNames)
-    # rootPkgInfo.requires &= options.action.packages
+  if options.action.typ == actionUpgrade:
+    pkgList = pkgList.filterIt(it.basicInfo.name notin toUpgradeNames)
 
   result = solveLocalPackages(rootPkgInfo, pkgList, solvedPkgs)
   if solvedPkgs.len > 0: 
@@ -124,12 +128,16 @@ proc processFreeDependenciesSAT(rootPkgInfo: PackageInfo, options: Options): Has
     allPkgsInfo.add pkg
   addReverseDeps(solvedPkgs, allPkgsInfo, options)
 
+  for nonLocked in toRemoveFromLocked:
+    result.excl nonLocked
+
   result = deleteStaleDependencies(result.toSeq, rootPkgInfo, options).toHashSet  
   satProccesedPackages = result
-
+ 
   if not solved:
     display("Error", output, Error, priority = HighPriority)
     raise nimbleError("Unsatisfiable dependencies")
+
 proc processFreeDependencies(pkgInfo: PackageInfo,
                              requirements: seq[PkgTuple],
                              options: Options,

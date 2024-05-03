@@ -678,38 +678,38 @@ requires "nim >= 1.5.1"
           testLockedVcsRevisions(@[(dep1PkgName, dep1PkgOriginRepoPath),
                                    (dep2PkgName, dep2PkgOriginRepoPath)])
 
-  # test "can upgrade: upgrade minimal set of deps":
-  #   cleanUp()
-  #   withPkgListFile:
-  #     initNewNimblePackage(mainPkgOriginRepoPath, mainPkgRepoPath,
-  #                          @[dep1PkgName])
-  #     initNewNimblePackage(dep1PkgOriginRepoPath, dep1PkgRepoPath, @[dep2PkgName])
-  #     initNewNimblePackage(dep2PkgOriginRepoPath, dep2PkgRepoPath)
+  test "can upgrade: upgrade minimal set of deps":
+    cleanUp()
+    withPkgListFile:
+      initNewNimblePackage(mainPkgOriginRepoPath, mainPkgRepoPath,
+                           @[dep1PkgName])
+      initNewNimblePackage(dep1PkgOriginRepoPath, dep1PkgRepoPath, @[dep2PkgName])
+      initNewNimblePackage(dep2PkgOriginRepoPath, dep2PkgRepoPath)
 
-  #     cd mainPkgRepoPath:
-  #       check execNimbleYes("lock").exitCode == QuitSuccess
+      cd mainPkgRepoPath:
+        check execNimbleYes("lock").exitCode == QuitSuccess
 
-  #     cd dep1PkgOriginRepoPath:
-  #       addAdditionalFileToTheRepo("dep1.nim", "echo 1")
+      cd dep1PkgOriginRepoPath:
+        addAdditionalFileToTheRepo("dep1.nim", "echo 1")
 
-  #     cd dep2PkgOriginRepoPath:
-  #       let first =  getRepoRevision()
-  #       addAdditionalFileToTheRepo("dep2.nim", "echo 2")
-  #       let second = getRepoRevision()
+      cd dep2PkgOriginRepoPath:
+        let first =  getRepoRevision()
+        addAdditionalFileToTheRepo("dep2.nim", "echo 2")
+        let second = getRepoRevision()
 
-  #       check execNimbleYes("install").exitCode == QuitSuccess
+        check execNimbleYes("install").exitCode == QuitSuccess
 
-  #       cd mainPkgRepoPath:
-  #         # verify that it won't upgrade version first
-  #         check execNimbleYes("upgrade", fmt "{dep1PkgName}@#HEAD").exitCode == QuitSuccess
-  #         check getRevision(dep2PkgName) == first
+        cd mainPkgRepoPath:
+          # verify that it won't upgrade version first
+          check execNimbleYes("upgrade", fmt "{dep1PkgName}@#HEAD").exitCode == QuitSuccess
+          check getRevision(dep2PkgName) == first
 
-  #         check execNimbleYes("upgrade", fmt "{dep2PkgName}@#{second}").exitCode == QuitSuccess
-  #         check getRevision(dep2PkgName) == second
+          check execNimbleYes("upgrade", fmt "{dep2PkgName}@#{second}").exitCode == QuitSuccess
+          check getRevision(dep2PkgName) == second
 
-  #         # verify that it won't upgrade version second
-  #         check execNimbleYes("upgrade", fmt "{dep1PkgName}@#HEAD").exitCode == QuitSuccess
-  #         check getRevision(dep2PkgName) == second
+          # verify that it won't upgrade version second
+          check execNimbleYes("upgrade", fmt "{dep1PkgName}@#HEAD").exitCode == QuitSuccess
+          check getRevision(dep2PkgName) == second
 
   test "can upgrade: the new version of the package with removed dep":
     cleanUp()
