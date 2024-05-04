@@ -82,7 +82,8 @@ proc processFreeDependenciesSAT(rootPkgInfo: PackageInfo, options: Options): Has
   var allPkgsInfo: seq[PackageInfo] = pkgList & rootPkgInfo
   #Remove from the pkglist the packages that exists in lock file and has a different vcsRevision
   var toUpgradeNames: seq[string]
-  if options.action.typ == actionUpgrade:
+  var isUpgrading = options.action.typ == actionUpgrade
+  if isUpgrading:
     toUpgradeNames = options.action.packages.mapIt(it[0])
     pkgList = pkgList.filterIt(it.basicInfo.name notin toUpgradeNames)
     
@@ -91,8 +92,9 @@ proc processFreeDependenciesSAT(rootPkgInfo: PackageInfo, options: Options): Has
     for name, lockedPkg in rootPkgInfo.lockedDeps[""]:
       for pkg in pkgList:
         if name notin toUpgradeNames and name == pkg.basicInfo.name and 
-          lockedPkg.vcsRevision != pkg.metaData.vcsRevision:
-          toRemoveFromLocked.add pkg
+         (isUpgrading and lockedPkg.vcsRevision != pkg.metaData.vcsRevision or 
+          not isUpgrading and lockedPkg.vcsRevision == pkg.metaData.vcsRevision):
+              toRemoveFromLocked.add pkg
 
   result = solveLocalPackages(rootPkgInfo, pkgList, solvedPkgs)
   if solvedPkgs.len > 0: 
