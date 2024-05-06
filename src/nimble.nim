@@ -102,6 +102,8 @@ proc processFreeDependenciesSAT(rootPkgInfo: PackageInfo, options: Options): Has
     addReverseDeps(solvedPkgs, allPkgsInfo, options)
     for pkg in allPkgsInfo:
       result.incl pkg
+    for nonLocked in toRemoveFromLocked:
+      result.excl nonLocked
     result = 
       result.toSeq
       .deleteStaleDependencies(rootPkgInfo, options)
