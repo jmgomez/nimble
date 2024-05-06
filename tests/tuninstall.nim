@@ -5,9 +5,8 @@
 
 import unittest, strutils, os, strformat
 import testscommon
-when not defined linux:
-  from nimblepkg/displaymessages import cannotUninstallPkgMsg
-  from nimblepkg/version import newVersion
+from nimblepkg/displaymessages import cannotUninstallPkgMsg
+from nimblepkg/version import newVersion
 
 from nimblepkg/common import cd
 
@@ -51,57 +50,56 @@ suite "uninstall":
   test "issue #27":
     setupIssue27Packages()
 
-  when not defined(linux):
-    test "can uninstall":
-      # setup test environment
-      cleanDir(installDir)
-      setupIssue27Packages()
-      check execNimbleYes("install", &"{pkgAUrl}@0.2").exitCode == QuitSuccess
-      check execNimbleYes("install", &"{pkgAUrl}@0.5").exitCode == QuitSuccess
-      check execNimbleYes("install", &"{pkgAUrl}@0.6").exitCode == QuitSuccess
-      check execNimbleYes("install", pkgBin2Url).exitCode == QuitSuccess
-      check execNimbleYes("install", pkgBUrl).exitCode == QuitSuccess
-      cd "nimscript": check execNimbleYes("install").exitCode == QuitSuccess
+  test "can uninstall":
+    # setup test environment
+    cleanDir(installDir)
+    setupIssue27Packages()
+    check execNimbleYes("install", &"{pkgAUrl}@0.2").exitCode == QuitSuccess
+    check execNimbleYes("install", &"{pkgAUrl}@0.5").exitCode == QuitSuccess
+    check execNimbleYes("install", &"{pkgAUrl}@0.6").exitCode == QuitSuccess
+    check execNimbleYes("install", pkgBin2Url).exitCode == QuitSuccess
+    check execNimbleYes("install", pkgBUrl).exitCode == QuitSuccess
+    cd "nimscript": check execNimbleYes("install").exitCode == QuitSuccess
 
-      block:
-        let (outp, exitCode) = execNimbleYes("uninstall", "issue27b")
-        check exitCode != QuitSuccess
-        var ls = outp.strip.processOutput()
-        let pkg27ADir = getPackageDir(pkgsDir, "issue27a-0.1.0", false)
-        let expectedMsg = cannotUninstallPkgMsg(
-          "issue27b", newVersion("0.1.0"), @[pkg27ADir])
-        check ls.inLinesOrdered(expectedMsg)
-
-        check execNimbleYes("uninstall", "issue27").exitCode == QuitSuccess
-        check execNimbleYes("uninstall", "issue27a").exitCode == QuitSuccess
-
-      # Remove Package*
-      check execNimbleYes("uninstall", "PackageA@0.5").exitCode == QuitSuccess
-
-      let (outp, exitCode) = execNimbleYes("uninstall", "PackageA")
+    block:
+      let (outp, exitCode) = execNimbleYes("uninstall", "issue27b")
       check exitCode != QuitSuccess
-      let ls = outp.processOutput()
-      let
-        pkgBin2Dir = getPackageDir(pkgsDir, "packagebin2-0.1.0", false)
-        pkgBDir = getPackageDir(pkgsDir, "packageb-0.1.0", false)
-        expectedMsgForPkgA0dot6 = cannotUninstallPkgMsg(
-          "PackageA", newVersion("0.6.0"), @[pkgBin2Dir])
-        expectedMsgForPkgA0dot2 = cannotUninstallPkgMsg(
-          "PackageA", newVersion("0.2.0"), @[pkgBDir])
-      check ls.inLines(expectedMsgForPkgA0dot6)
-      check ls.inLines(expectedMsgForPkgA0dot2)
+      var ls = outp.strip.processOutput()
+      let pkg27ADir = getPackageDir(pkgsDir, "issue27a-0.1.0", false)
+      let expectedMsg = cannotUninstallPkgMsg(
+        "issue27b", newVersion("0.1.0"), @[pkg27ADir])
+      check ls.inLinesOrdered(expectedMsg)
 
-      check execNimbleYes("uninstall", "PackageBin2").exitCode == QuitSuccess
+      check execNimbleYes("uninstall", "issue27").exitCode == QuitSuccess
+      check execNimbleYes("uninstall", "issue27a").exitCode == QuitSuccess
 
-      # Case insensitive
-      check execNimbleYes("uninstall", "packagea").exitCode == QuitSuccess
-      check execNimbleYes("uninstall", "PackageA").exitCode != QuitSuccess
+    # Remove Package*
+    check execNimbleYes("uninstall", "PackageA@0.5").exitCode == QuitSuccess
 
-      # Remove the rest of the installed packages.
-      check execNimbleYes("uninstall", "PackageB").exitCode == QuitSuccess
+    let (outp, exitCode) = execNimbleYes("uninstall", "PackageA")
+    check exitCode != QuitSuccess
+    let ls = outp.processOutput()
+    let
+      pkgBin2Dir = getPackageDir(pkgsDir, "packagebin2-0.1.0", false)
+      pkgBDir = getPackageDir(pkgsDir, "packageb-0.1.0", false)
+      expectedMsgForPkgA0dot6 = cannotUninstallPkgMsg(
+        "PackageA", newVersion("0.6.0"), @[pkgBin2Dir])
+      expectedMsgForPkgA0dot2 = cannotUninstallPkgMsg(
+        "PackageA", newVersion("0.2.0"), @[pkgBDir])
+    check ls.inLines(expectedMsgForPkgA0dot6)
+    check ls.inLines(expectedMsgForPkgA0dot2)
 
-      check execNimbleYes("uninstall", "PackageA@0.2", "issue27b").exitCode ==
-          QuitSuccess
-      check(not dirExists(pkgsDir / "PackageA-0.2.0"))
+    check execNimbleYes("uninstall", "PackageBin2").exitCode == QuitSuccess
 
-      check execNimbleYes("uninstall", "nimscript").exitCode == QuitSuccess
+    # Case insensitive
+    check execNimbleYes("uninstall", "packagea").exitCode == QuitSuccess
+    check execNimbleYes("uninstall", "PackageA").exitCode != QuitSuccess
+
+    # Remove the rest of the installed packages.
+    check execNimbleYes("uninstall", "PackageB").exitCode == QuitSuccess
+
+    check execNimbleYes("uninstall", "PackageA@0.2", "issue27b").exitCode ==
+        QuitSuccess
+    check(not dirExists(pkgsDir / "PackageA-0.2.0"))
+
+    check execNimbleYes("uninstall", "nimscript").exitCode == QuitSuccess
