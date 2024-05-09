@@ -62,12 +62,11 @@ proc displaySatisfiedMsg(solvedPkgs: seq[SolvedPackage], pkgToInstall: seq[(stri
 
 proc addReverseDeps(solvedPkgs: seq[SolvedPackage], allPkgsInfo: seq[PackageInfo], options: Options) = 
   for pkg in solvedPkgs:
-    let solvedPkg = getPackageInfo(pkg.pkgName, allPkgsInfo)
+    let solvedPkg = getPackageInfo(pkg.pkgName, allPkgsInfo, some pkg.version)
     if solvedPkg.isNone: continue
-    for reverseDepName in pkg.reverseDependencies:
-      var reverseDep = getPackageInfo(reverseDepName, allPkgsInfo)
+    for (reverseDepName, ver) in pkg.reverseDependencies:
+      var reverseDep = getPackageInfo(reverseDepName, allPkgsInfo, some ver)
       if reverseDep.isNone: continue
-
       if reverseDep.get.myPath.parentDir.developFileExists:
         reverseDep.get.isLink = true
       addRevDep(options.nimbleData, solvedPkg.get.basicInfo, reverseDep.get)
