@@ -62,6 +62,23 @@ type
     
   GetPackageMinimal* = proc (pv: PkgTuple, options: Options): Option[PackageMinimalInfo]
 
+#From the STD as it is not available in older Nim versions
+func addUnique*[T](s: var seq[T], x: sink T) =
+  ## Adds `x` to the container `s` if it is not already present. 
+  ## Uses `==` to check if the item is already present.
+  runnableExamples:
+    var a = @[1, 2, 3]
+    a.addUnique(4)
+    a.addUnique(4)
+    assert a == @[1, 2, 3, 4]
+
+  for i in 0..high(s):
+    if s[i] == x: return
+  when declared(ensureMove):
+    s.add ensureMove(x)
+  else:
+    s.add x
+
 proc isNim*(pv: PkgTuple): bool =
   pv.name == "nim" or pv.name == "nimrod"
 
@@ -354,23 +371,6 @@ proc fillPackageTableFromPreferred*(packages: var Table[string, PackageVersions]
 
 proc getInstalledMinimalPackages*(options: Options): seq[PackageMinimalInfo] =
   getInstalledPkgsMin(options.getPkgsDir(), options).mapIt(it.getMinimalInfo())
-
-#From the STD as it is not available in older Nim versions
-func addUnique*[T](s: var seq[T], x: sink T) =
-  ## Adds `x` to the container `s` if it is not already present. 
-  ## Uses `==` to check if the item is already present.
-  runnableExamples:
-    var a = @[1, 2, 3]
-    a.addUnique(4)
-    a.addUnique(4)
-    assert a == @[1, 2, 3, 4]
-
-  for i in 0..high(s):
-    if s[i] == x: return
-  when declared(ensureMove):
-    s.add ensureMove(x)
-  else:
-    s.add x
 
 proc collectAllVersions*(versions: var Table[string, PackageVersions], package: PackageMinimalInfo, options: Options, getMinimalPackage: GetPackageMinimal,  preferredPackages: seq[PackageMinimalInfo] = newSeq[PackageMinimalInfo]()) =
   ### Collects all the versions of a package and its dependencies and stores them in the versions table
