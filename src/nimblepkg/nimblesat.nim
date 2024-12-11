@@ -529,8 +529,6 @@ proc saveTaggedVersions*(repoDir, pkgName: string, taggedVersions: TaggedPackage
 proc getPackageMinimalVersionsFromRepo*(repoDir: string, name: string, version: Version, downloadMethod: DownloadMethod, options: Options): seq[PackageMinimalInfo] =
   #This is expensive. We need to cache it. Potentially it could be also run in parallel
   # echo &"Discovering version for {pkgName}"
-  gitFetchTags(repoDir, downloadMethod)    
-  let tags = getTagsList(repoDir, downloadMethod).getVersionList()
   template checkoutCurrentVersion() = 
     if version.isSpecial:
       var specialVersion = substr($version, 1)
@@ -542,8 +540,9 @@ proc getPackageMinimalVersionsFromRepo*(repoDir: string, name: string, version: 
         if ver == version:
           doCheckout(downloadMethod, repoDir, tag)
 
-  result = newSeq[PackageMinimalInfo]()
-  checkoutCurrentVersion()
+  result = newSeq[PackageMinimalInfo]()  
+  gitFetchTags(repoDir, downloadMethod)    
+  let tags = getTagsList(repoDir, downloadMethod).getVersionList()
   let taggedVersions = getTaggedVersions(repoDir, name, options)
   if taggedVersions.isSome:
     return taggedVersions.get.versions
