@@ -19,8 +19,8 @@ when defined(nimdistros):
   else:
     foreignDep "openssl"
 
-before install:
-  exec "git submodule update --init"
+# before install:
+#   exec "git submodule update --init"
 
 task test, "Run the Nimble tester!":
   withDir "tests":
