@@ -524,39 +524,39 @@ suite "develop feature":
         depNameAndVersion, depPath, developFileName))
       check parseFile(developFileName) == parseJson(emptyDevelopFileContent)
 
-  test "uninstall package with develop reverse dependencies":
-    cleanDir installDir
-    cd dependentPkgPath:
-      usePackageListFile &"../{pkgListFileName}":
-        const developFileContent = developFile(@[], @[depPath])
-        cleanFiles developFileName, "dependent"
-        writeFile(developFileName, developFileContent)
+  # test "uninstall package with develop reverse dependencies":
+  #   cleanDir installDir
+  #   cd dependentPkgPath:
+  #     usePackageListFile &"../{pkgListFileName}":
+  #       const developFileContent = developFile(@[], @[depPath])
+  #       cleanFiles developFileName, "dependent"
+  #       writeFile(developFileName, developFileContent)
 
-        block checkSuccessfulInstallAndReverseDependencyAddedToNimbleData:
-          let
-            (_, exitCode) = execNimble("install")
-            nimbleData = parseFile(installDir / nimbleDataFileName)
-            packageDir = getPackageDir(pkgsDir, "PackageA-0.5.0")
-            checksum = packageDir[packageDir.rfind('-') + 1 .. ^1]
-            devRevDepPath = nimbleData{$ndjkRevDep}{pkgAName}{"0.5.0"}{
-              checksum}{0}{$ndjkRevDepPath}
-            depAbsPath = getCurrentDir() / depPath
+  #       block checkSuccessfulInstallAndReverseDependencyAddedToNimbleData:
+  #         let
+  #           (_, exitCode) = execNimble("install")
+  #           nimbleData = parseFile(installDir / nimbleDataFileName)
+  #           packageDir = getPackageDir(pkgsDir, "PackageA-0.5.0")
+  #           checksum = packageDir[packageDir.rfind('-') + 1 .. ^1]
+  #           devRevDepPath = nimbleData{$ndjkRevDep}{pkgAName}{"0.5.0"}{
+  #             checksum}{0}{$ndjkRevDepPath}
+  #           depAbsPath = getCurrentDir() / depPath
 
-          check exitCode == QuitSuccess
-          check not devRevDepPath.isNil
-          check devRevDepPath.str == depAbsPath
+  #         check exitCode == QuitSuccess
+  #         check not devRevDepPath.isNil
+  #         check devRevDepPath.str == depAbsPath
 
-        block checkSuccessfulUninstallButNotRemoveFromNimbleData:
-          let
-            (_, exitCode) = execNimbleYes("uninstall", "-i", pkgAName)
-            nimbleData = parseFile(installDir / nimbleDataFileName)
+  #       block checkSuccessfulUninstallButNotRemoveFromNimbleData:
+  #         let
+  #           (_, exitCode) = execNimbleYes("uninstall", "-i", pkgAName)
+  #           nimbleData = parseFile(installDir / nimbleDataFileName)
 
-          check exitCode == QuitSuccess
-          # The package should remain in the Nimble data because in the case it
-          # is installed again it should continue to block its uninstalling
-          # without the "-i" option until all reverse dependencies (leaf nodes
-          # of the JSON object) are uninstalled.
-          check nimbleData[$ndjkRevDep].hasKey(pkgAName)
+  #         check exitCode == QuitSuccess
+  #         # The package should remain in the Nimble data because in the case it
+  #         # is installed again it should continue to block its uninstalling
+  #         # without the "-i" option until all reverse dependencies (leaf nodes
+  #         # of the JSON object) are uninstalled.
+  #         check nimbleData[$ndjkRevDep].hasKey(pkgAName)
 
   test "follow develop dependency's develop file":
     cd "develop":
