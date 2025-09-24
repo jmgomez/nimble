@@ -114,7 +114,7 @@ type
 
   NimResolved* = object
     pkg*: Option[PackageInfo] #when none, we need to install it
-    version*: Version
+    version*: Version    
 
   PackageMinimalInfo* = object
     name*: string
@@ -139,7 +139,8 @@ type
     buildPkgs*: seq[PackageInfo] #Packages that were built in the current pass
     declarativeParseFailed*: bool
     declarativeParserErrorLines*: seq[string]
-    nimResolved*: NimResolved
+    nimResolved*: NimResolved #The nim that the solver picked
+    bootstrapNim*: NimResolved #The nim that we are going to use if we dont have a nim resolved yet and the declarative parser failed. Notice this is required to Atomic Parser fallback (not implemented)
     normalizedRequirements*: Table[string, string] #normalized -> old. Some packages are not published as nimble packages, we keep the url for installation.
     pkgVersionTable*: Table[string, PackageVersions]
 
