@@ -48,10 +48,9 @@ type
   GetPackageMinimal* = proc (pv: PkgTuple, options: Options, nimBin: string): seq[PackageMinimalInfo]
   GetPackageMinimalAsync* = proc (pv: PkgTuple, options: Options, nimBin: string): Future[seq[PackageMinimalInfo]] {.gcsafe.}
 
-  TaggedPackageVersions = object
-    maxTaggedVersions: int # Maximum number of tags. When number changes, we invalidate the cache
-    versions: seq[PackageMinimalInfo]
-  
+  TaggedVersionsCache* = Table[string, seq[PackageMinimalInfo]]
+    ## Central cache for all package tagged versions, keyed by normalized package name
+
   VersionAttempt = tuple[pkgName: string, version: Version]
 
   PackageDownloadInfo* = object
@@ -186,6 +185,20 @@ proc cmp(a,b: DependencyVersion): int =
   ## to set variables to FALSE first - by assigning variables to older
   ## versions first (lower indices), the solver will try to set them false,
   ## leaving newer versions (higher indices) more likely to be selected.
+  ##
+  ## Special versions (#head, #branch, etc.) are always placed FIRST (as if they
+  ## were the "oldest"), so the SAT solver will try to set them FALSE first,
+  ## preferring tagged/regular versions over special versions.
+  let aIsSpecial = a.version.isSpecial
+  let bIsSpecial = b.version.isSpecial
+
+  # Special versions come first (treated as oldest) so SAT solver prefers regular versions
+  if aIsSpecial and not bIsSpecial:
+    return -1  # a (special) comes before b (regular)
+  elif bIsSpecial and not aIsSpecial:
+    return 1   # b (special) comes before a (regular), so a comes after
+
+  # Both special or both regular: use normal version comparison
   if a.version < b.version: return -1
   elif a.version == b.version: return 0
   else: return 1
@@ -653,47 +666,62 @@ proc getAllNimReleases(options: Options): seq[PackageMinimalInfo] =
   if options.nimBin.isSome:
     result.addUnique PackageMinimalInfo(name: "nim", version: options.nimBin.get.version)
 
-proc getCacheFileName(repoDir, pkgName: string, options: Options): string =
-  # return options.getNimbleDir / "pkgcache" / "tagged" / "test" & ".json"
-  if options.localDeps:
-    var pkgName = 
-      if pkgName.isUrl:
-        pkgName.getDownloadDirName(VersionRange(kind: verAny), notSetSha1Hash)
-      else:
-        pkgName
-    return options.getNimbleDir / "pkgcache" / "tagged" / pkgName & ".json"
-  else:
-    return repoDir / TaggedVersionsFileName
+proc getTaggedVersionsCacheFile*(options: Options): string =
+  ## Returns the path to the centralized tagged versions cache file
+  options.pkgCachePath / TaggedVersionsFileName
 
-proc getTaggedVersions*(repoDir, pkgName: string, options: Options): Option[TaggedPackageVersions] =
-  let file = getCacheFileName(repoDir, pkgName, options)
+proc normalizePackageName*(pkgName: string): string =
+  ## Normalizes a package name for use as cache key (lowercase for consistent lookups)
+  pkgName.toLowerAscii
+
+proc readTaggedVersionsCache*(options: Options): TaggedVersionsCache =
+  ## Reads the entire tagged versions cache from disk
+  let file = getTaggedVersionsCacheFile(options)
   if file.fileExists:
     try:
-      let taggedVersions = file.readFile.parseJson().to(TaggedPackageVersions)
-      if taggedVersions.maxTaggedVersions != options.maxTaggedVersions:
-        return none(TaggedPackageVersions)
-      return some taggedVersions
+      result = file.readFile.parseJson().to(TaggedVersionsCache)
     except CatchableError as e:
-      displayWarning(&"Error reading tagged versions: {e.msg} for {pkgName}", HighPriority)
-      return none(TaggedPackageVersions)
+      displayWarning(&"Error reading tagged versions cache: {e.msg}", HighPriority)
+      result = initTable[string, seq[PackageMinimalInfo]]()
   else:
-    return none(TaggedPackageVersions)
+    result = initTable[string, seq[PackageMinimalInfo]]()
 
-proc saveTaggedVersions*(repoDir, pkgName: string, taggedVersions: TaggedPackageVersions, options: Options) =
-  let file = getCacheFileName(repoDir, pkgName, options)
+proc writeTaggedVersionsCache*(cache: TaggedVersionsCache, options: Options) =
+  ## Atomically writes the tagged versions cache to disk
+  let file = getTaggedVersionsCacheFile(options)
+  let tempFile = file & ".tmp"
   try:
     createDir(file.parentDir)
-    file.writeFile((taggedVersions.toJson()).pretty)
+    tempFile.writeFile(cache.toJson().pretty)
+    moveFile(tempFile, file)
   except CatchableError as e:
-    displayWarning(&"Error saving tagged versions: {e.msg}", HighPriority)
+    displayWarning(&"Error saving tagged versions cache: {e.msg}", HighPriority)
+    try:
+      removeFile(tempFile)
+    except: discard
+
+proc getTaggedVersions*(pkgName: string, options: Options): Option[seq[PackageMinimalInfo]] =
+  ## Gets cached tagged versions for a specific package
+  let cache = readTaggedVersionsCache(options)
+  let key = normalizePackageName(pkgName)
+  if key in cache:
+    return some(cache[key])
+  return none(seq[PackageMinimalInfo])
+
+proc saveTaggedVersions*(pkgName: string, versions: seq[PackageMinimalInfo], options: Options) =
+  ## Saves tagged versions for a specific package (atomic read-modify-write)
+  var cache = readTaggedVersionsCache(options)
+  let key = normalizePackageName(pkgName)
+  cache[key] = versions
+  writeTaggedVersionsCache(cache, options)
 
 proc getPackageMinimalVersionsFromRepo*(repoDir: string, pkg: PkgTuple, version: Version, downloadMethod: DownloadMethod, options: Options, nimBin: string): seq[PackageMinimalInfo] =
   result = newSeq[PackageMinimalInfo]()
-  
+
   let name = pkg[0]
-  let taggedVersions = getTaggedVersions(repoDir, name, options)
+  let taggedVersions = getTaggedVersions(name, options)
   if taggedVersions.isSome:
-    return taggedVersions.get.versions
+    return taggedVersions.get
 
   let tempDir = repoDir & "_versions"
   # During version discovery, we only need to read .nimble files, not compile code
@@ -715,12 +743,7 @@ proc getPackageMinimalVersionsFromRepo*(repoDir: string, pkg: PkgTuple, version:
       displayWarning(&"Error fetching tags for {name}: {e.msg}", HighPriority)
     
     # Process tagged versions first (so they take precedence over HEAD)
-    var checkedTags = 0
-    for (ver, tag) in tags.pairs:    
-      if options.maxTaggedVersions > 0 and checkedTags >= options.maxTaggedVersions:
-        break
-      inc checkedTags
-      
+    for (ver, tag) in tags.pairs:
       try:
         let tagVersion = newVersion($ver)
 
@@ -758,13 +781,9 @@ proc getPackageMinimalVersionsFromRepo*(repoDir: string, pkg: PkgTuple, version:
 
     if not (not options.isLegacy and options.satResult.pass == satNimSelection and options.satResult.declarativeParseFailed):
       #Dont save tagged versions if we are in vNext and the declarative parser failed as this could cache the incorrect versions.
-      #its suboptimal in the sense that next packages after failure wont be saved in the first past but there is a guarantee that there is a second pass in the case 
+      #its suboptimal in the sense that next packages after failure wont be saved in the first past but there is a guarantee that there is a second pass in the case
       #the declarative parser fails so they will be saved then.
-      saveTaggedVersions(repoDir, name, 
-                        TaggedPackageVersions(
-                          maxTaggedVersions: options.maxTaggedVersions, 
-                          versions: result
-                        ), options)
+      saveTaggedVersions(name, result, options)
   finally:
     try:
       removeDir(tempDir)
@@ -777,9 +796,9 @@ proc getPackageMinimalVersionsFromRepoAsync*(repoDir: string, pkg: PkgTuple, ver
 
   let name = pkg[0]
   try:
-    let taggedVersions = getTaggedVersions(repoDir, name, options)
+    let taggedVersions = getTaggedVersions(name, options)
     if taggedVersions.isSome:
-      return taggedVersions.get.versions
+      return taggedVersions.get
   except Exception:
     discard # Continue with fetching from repo
 
@@ -803,12 +822,7 @@ proc getPackageMinimalVersionsFromRepoAsync*(repoDir: string, pkg: PkgTuple, ver
       displayWarning(&"Error fetching tags for {name}: {e.msg}", HighPriority)
 
     # Process tagged versions first (so they take precedence over HEAD)
-    var checkedTags = 0
     for (ver, tag) in tags.pairs:
-      if options.maxTaggedVersions > 0 and checkedTags >= options.maxTaggedVersions:
-        break
-      inc checkedTags
-
       try:
         let tagVersion = newVersion($ver)
 
@@ -854,11 +868,7 @@ proc getPackageMinimalVersionsFromRepoAsync*(repoDir: string, pkg: PkgTuple, ver
       #its suboptimal in the sense that next packages after failure wont be saved in the first past but there is a guarantee that there is a second pass in the case
       #the declarative parser fails so they will be saved then.
       try:
-        saveTaggedVersions(repoDir, name,
-                          TaggedPackageVersions(
-                            maxTaggedVersions: options.maxTaggedVersions,
-                            versions: result
-                          ), options)
+        saveTaggedVersions(name, result, options)
       except Exception as e:
         displayWarning(&"Error saving tagged versions for {name}: {e.msg}", LowPriority)
   finally:
@@ -902,11 +912,11 @@ proc getPackageMinimalVersionsFromRepoAsyncFast*(
 
   # Check cache first
   try:
-    let taggedVersions = getTaggedVersions(repoDir, name, options)
+    let taggedVersions = getTaggedVersions(name, options)
     if taggedVersions.isSome:
-      return taggedVersions.get.versions
+      return taggedVersions.get
   except Exception:
-    discard
+    discard  # Cache error - continue with tag discovery
 
   # Fetch all tags
   var tags = initOrderedTable[Version, string]()
@@ -931,12 +941,7 @@ proc getPackageMinimalVersionsFromRepoAsyncFast*(
     displayWarning(&"Error getting package info for {name}: {e.msg}", HighPriority)
 
   # Process each tag - read nimble file directly from git
-  var checkedTags = 0
   for (ver, tag) in tags.pairs:
-    if options.maxTaggedVersions > 0 and checkedTags >= options.maxTaggedVersions:
-      break
-    inc checkedTags
-
     try:
       # List nimble files in this tag
       let nimbleFiles = await gitListNimbleFilesInCommitAsync(gitRoot, tag)
@@ -987,11 +992,7 @@ proc getPackageMinimalVersionsFromRepoAsyncFast*(
 
   # Save to cache
   try:
-    saveTaggedVersions(repoDir, name,
-                      TaggedPackageVersions(
-                        maxTaggedVersions: options.maxTaggedVersions,
-                        versions: result
-                      ), options)
+    saveTaggedVersions(name, result, options)
   except Exception as e:
     displayWarning(&"Error saving tagged versions for {name}: {e.msg}", LowPriority)
 
@@ -1196,13 +1197,6 @@ proc getMinimalFromPreferredAsync*(pv: PkgTuple, getMinimalPackage: GetPackageMi
     if result.len == 0:
       raise newException(CatchableError, e.msg)
 
-proc hasSpecialVersion(versions: Table[string, PackageVersions], pkgName: string): bool =
-  if pkgName in versions:
-    for pkg in versions[pkgName].versions:
-      if pkg.version.isSpecial:
-        return true
-  return false
-
 proc processRequirements(versions: var Table[string, PackageVersions], pv: PkgTuple, visited: var HashSet[PkgTuple], getMinimalPackage: GetPackageMinimal, preferredPackages: seq[PackageMinimalInfo] = newSeq[PackageMinimalInfo](), options: Options, nimBin: string) =
   if pv in visited:
     return
@@ -1250,18 +1244,14 @@ proc processRequirements(versions: var Table[string, PackageVersions], pv: PkgTu
             specialVer.speSemanticVersion = some($pkgMin.version)  # Store the real version
             pkgMin.version = specialVer
           
-          # If this is a special version, clear any existing regular versions
-          # to force the SAT solver to use this specific version
-          if versions.hasKey(pkgName):
-            versions[pkgName].versions = @[pkgMin]
-          else:
+          # Add special version alongside existing versions - let the SAT solver choose
+          if pkgName notin versions:
             versions[pkgName] = PackageVersions(pkgName: pkgName, versions: @[pkgMin])
+          else:
+            versions[pkgName].versions.addUnique pkgMin
         else:
-          # Don't add regular versions if a special version already exists
-          if hasSpecialVersion(versions, pkgName):
-            continue
-            
-          if not versions.hasKey(pkgName):
+          # Add regular versions alongside any existing special versions
+          if pkgName notin versions:
             versions[pkgName] = PackageVersions(pkgName: pkgName, versions: @[pkgMin])
           else:
             versions[pkgName].versions.addUnique pkgMin
@@ -1334,8 +1324,11 @@ proc processRequirementsAsync(pv: PkgTuple, visitedParam: HashSet[PkgTuple], get
           specialVer.speSemanticVersion = some($pkgMin.version)  # Store the real version
           pkgMin.version = specialVer
 
-        # Special versions replace any existing versions
-        result[pkgName] = PackageVersions(pkgName: pkgName, versions: @[pkgMin])
+        # Add special version alongside existing versions - let the SAT solver choose
+        if not result.hasKey(pkgName):
+          result[pkgName] = PackageVersions(pkgName: pkgName, versions: @[pkgMin])
+        else:
+          result[pkgName].versions.addUnique pkgMin
       else:
         # Add to result table
         if not result.hasKey(pkgName):

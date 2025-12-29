@@ -3,7 +3,7 @@ import unittest, os, osproc
 import testscommon
 # from nimblepkg/common import cd Used in the commented tests
 import std/[tables, sequtils, json, jsonutils, strutils, times, options, strformat]
-import nimblepkg/[version, nimblesat, options, config, download, packageinfotypes, packageinfo]
+import nimblepkg/[version, nimblesat, options, config, download, packageinfotypes]
 from nimblepkg/common import cd
 
 let nimBin = "nim"
@@ -317,7 +317,6 @@ suite "SAT solver":
 
   test "should be able to get all the released PackageVersions from a git local repository":
     var options = initOptions()
-    options.maxTaggedVersions = 0 #all
     options.nimBin = some options.makeNimBin("nim")
     options.config.packageLists["official"] = PackageList(name: "Official", urls: @[
     "https://raw.githubusercontent.com/nim-lang/packages/master/packages.json",
@@ -334,11 +333,11 @@ suite "SAT solver":
     let availableVersions = @["0.3.4", "0.3.5", "0.3.6", "0.4.5", "0.4.4"].mapIt(newVersion(it))
     for version in availableVersions:
       check version in packageVersions.mapIt(it.version)
-    check fileExists(repoDir / TaggedVersionsFileName)
-  
+    # Check that centralized cache file exists
+    check fileExists(getTaggedVersionsCacheFile(options))
+
   test "should not use the cache when switching versions":
     var options = initOptions()
-    options.maxTaggedVersions = 0 #all
     options.nimBin = some options.makeNimBin("nim")
     options.localDeps = false
     options.config.packageLists["official"] = PackageList(name: "Official", urls: @[
@@ -354,19 +353,21 @@ suite "SAT solver":
     let downloadResPrev = pvPrev.downloadPkgFromUrl(options, nimBin = nimBin)[0]
     let repoDirPrev = downloadResPrev.dir
     discard getPackageMinimalVersionsFromRepo(repoDirPrev, pvPrev, downloadResPrev.version,  DownloadMethod.git, options, nimBin = nimBin)
-    check fileExists(repoDirPrev / TaggedVersionsFileName)
-    
+    # Check that centralized cache file exists and contains the package
+    check fileExists(getTaggedVersionsCacheFile(options))
+    check getTaggedVersions("nimfp", options).isSome
+
     let pv = parseRequires("nimfp >= 0.4.4")
     let downloadRes = pv.downloadPkgFromUrl(options, nimBin = nimBin)[0]
-    let repoDir = downloadRes.dir 
-    check not fileExists(repoDir / TaggedVersionsFileName)
+    let repoDir = downloadRes.dir
 
     let packageVersions = getPackageMinimalVersionsFromRepo(repoDir, pv, downloadRes.version, DownloadMethod.git, options, nimBin = nimBin)
     #we know these versions are available
     let availableVersions = @["0.4.5", "0.4.4"].mapIt(newVersion(it))
     for version in availableVersions:
       check version in packageVersions.mapIt(it.version)
-    check fileExists(repoDir / TaggedVersionsFileName)
+    # Versions should be in the centralized cache
+    check getTaggedVersions("nimfp", options).isSome
 
   #Desactivate tests as it goes against local deps mode by default. Need to be redone
   # test "should not use the global tagged cache when in local but a local one":
@@ -433,8 +434,8 @@ suite "SAT solver":
     var pkgVersionTable = initTable[string, PackageVersions]()
     collectAllVersions(pkgVersionTable, root, options, downloadMinimalPackage, nimBin = nimBin)
     for k, v in pkgVersionTable:
-      if not k.isNim:
-        check v.versions.len <= options.maxTaggedVersions
+      # Just verify we got some versions for each package
+      check v.versions.len > 0
       echo &"{k} versions {v.versions.len}"
   
   test "should fallback to a previous version of a dependency when is unsatisfable": 
