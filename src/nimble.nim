@@ -2164,6 +2164,8 @@ proc doAction(options: var Options, nimBin: string) {.instrument.} =
       # We do that here to make sure that any binaries from dependencies
       # are installed
       # If valid task defined in nimscript, run it
+      # Set __NIMBLE_PATHS so getPaths()/getPathsClause() work in nimscript tasks
+      putEnv("__NIMBLE_PATHS", optsCopy.getPathsAllPkgs().toSeq.join("|"))
       var execResult: ExecutionResult[bool]
       if execCustom(nimBin, nimbleFile, optsCopy, execResult):
         if execResult.hasTaskRequestedCommand():
