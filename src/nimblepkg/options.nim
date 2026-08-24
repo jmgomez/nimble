@@ -129,6 +129,8 @@ type
       onlyNimBinaries*: bool
       onlyInstalled*: bool
       showListVersions*: bool
+      packageNames*: seq[string] # Restrict the listing to these packages.
+                                 # Empty means list everything.
     of actionInit, actionDump:
       projName*: string
       vcsOption*: string
@@ -235,7 +237,8 @@ Commands:
   search       pkg/tag            Searches for a specified package. Search is
                                   performed by tag and by name.
                [--ver, --version] Queries remote server for package version.
-  list                            Lists all packages.
+  list         [pkgname, ...]     Lists all packages, or only the named ones
+                                  when package names are given.
                [-i, --installed]  Lists all installed packages.
                [--ver, --version] Also display versions for packages.
                [-n, --nimbinaries]  Lists all installed packages.
@@ -744,7 +747,9 @@ proc parseArgument*(key: string, result: var Options) =
     result.action.projName = key
   of actionCompile, actionDoc:
     result.action.file = key
-  of actionList, actionPublish:
+  of actionList:
+    result.action.packageNames.add key
+  of actionPublish:
     result.showHelp = true
   of actionBuild:
     result.action.file = key

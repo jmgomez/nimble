@@ -114,6 +114,69 @@ suite "misc tests":
     check execNimble("list").exitCode == QuitSuccess
     check execNimble("list", "-i").exitCode == QuitSuccess
 
+  test "list with a package name shows only that package (#1825)":
+    usePackageListFile "develop/packages.json":
+      let (output, exitCode) = execNimble("list", "packagea")
+      checkpoint output
+      check exitCode == QuitSuccess
+      check output.contains("packagea:")
+      check not output.contains("packageb:")
+
+  test "list matches the package name case insensitively (#1825)":
+    usePackageListFile "develop/packages.json":
+      let (output, exitCode) = execNimble("list", "PackageA")
+      checkpoint output
+      check exitCode == QuitSuccess
+      check output.contains("packagea:")
+
+  test "list accepts several package names (#1825)":
+    usePackageListFile "develop/packages.json":
+      let (output, exitCode) = execNimble("list", "packagea", "packageb")
+      checkpoint output
+      check exitCode == QuitSuccess
+      check output.contains("packagea:")
+      check output.contains("packageb:")
+
+  test "list with an unknown package name fails (#1825)":
+    usePackageListFile "develop/packages.json":
+      let (output, exitCode) = execNimble("list", "nosuchpackage")
+      checkpoint output
+      check exitCode == QuitFailure
+      check output.contains("nosuchpackage")
+
+  test "list with a package name and --ver shows its versions (#1825)":
+    usePackageListFile "develop/packages.json":
+      let (output, exitCode) = execNimble("list", "packagea", "--ver")
+      checkpoint output
+      check exitCode == QuitSuccess
+      check output.contains("packagea:")
+      check output.contains("versions:")
+      check not output.contains("packageb:")
+
+  test "list -i with a package name shows only that package (#1825)":
+    check execNimbleYes("install", pkgAUrl).exitCode == QuitSuccess
+    check execNimbleYes("install", pkgBin2Url).exitCode == QuitSuccess
+
+    # The installed package names keep their original casing (`PackageA`), so
+    # compare case insensitively — the lookup itself is case insensitive too.
+    let (all, allExitCode) = execNimble("list", "-i")
+    checkpoint all
+    check allExitCode == QuitSuccess
+    check all.toLower.contains("packagea")
+    check all.toLower.contains("packagebin2")
+
+    let (output, exitCode) = execNimble("list", "-i", "packagea")
+    checkpoint output
+    check exitCode == QuitSuccess
+    check output.toLower.contains("packagea")
+    check not output.toLower.contains("packagebin2")
+
+  test "list -i with a package name that is not installed fails (#1825)":
+    let (output, exitCode) = execNimble("list", "-i", "nosuchpackage")
+    checkpoint output
+    check exitCode == QuitFailure
+    check output.contains("nosuchpackage")
+
   test "should not install submodules when --ignoreSubmodules flag is on":
     cleanDir(installDir)
     let (_, exitCode) = execNimble("--ignoreSubmodules", "install", "https://github.com/jmgomez/submodule_package")
