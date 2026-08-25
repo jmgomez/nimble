@@ -105,11 +105,38 @@ For example to install the dependencies for a Nimble project `myPackage`:
 ## `nimble list`
 
 If you want to list *all* available packages, you can use `nimble list`, but beware: it is a very long (and not very useful) list.
-It might be better to use `nimble search` (explained below), to search for a specific package.
+
+Naming one or more packages restricts the output to those packages:
+
+    $ nimble list chronos
+
+    chronos:
+      url:         https://github.com/status-im/nim-chronos (git)
+      tags:        library, networking, async, asynchronous, eventloop, timers, sendfile, tcp, udp
+      description: An efficient library for asynchronous programming
+      license:     Apache License 2.0
+      website:     https://github.com/status-im/nim-chronos
+
+The name has to match a known package exactly, though the comparison is case insensitive.
+Nimble exits with an error if it does not know the package; use `nimble search` (explained below) to look for packages by name fragment or tag instead.
+
+Add `--ver` to also query the package's repository for the versions it has tagged:
+
+    $ nimble list chronos --ver
+
+    chronos:
+      url:         https://github.com/status-im/nim-chronos (git)
+      ...
+      versions:    v4.4.0, v4.2.4, v4.2.3, v4.2.2, v4.2.0, v4.0.7, ...
+
+Because `--ver` contacts each matching package's repository, it is worth naming the packages you care about.
+`nimble list --ver` on its own queries every package Nimble knows about, one at a time.
 
 If you want to see a list of locally installed packages and their versions, use `--installed`, or `-i` for short:
 
     $ nimble list -i
+
+This also accepts package names, so `nimble list -i chronos` reports just the installed copies of chronos.
 
 
 
@@ -176,6 +203,36 @@ Similar to the `install` command you can specify a version range, for example:
 
 
 
+## `nimble lock`
+
+The `lock` command generates or updates a package lock file.
+On its own it keeps every pin it already has, only re-solving when a package's requirements changed:
+
+```sh
+$ nimble lock
+```
+
+Two things ask it to move a pin, and they combine.
+
+**Naming packages** relocks those and leaves the rest of the file alone:
+
+```sh
+$ nimble lock chronos
+```
+
+**`--refresh`** resolves against the package repositories instead of the cached version information, so versions published since the last lock are picked up.
+With no package named it relocks everything to the newest available:
+
+```sh
+$ nimble lock --refresh          # everything, to the newest published
+$ nimble lock --refresh chronos  # just chronos, to the newest published
+```
+
+The distinction matters because `lock` normally resolves from Nimble's version cache.
+Without `--refresh`, `nimble lock chronos` moves chronos only as far as the newest version Nimble already knows about, which may be older than what upstream has published.
+
+`nimble upgrade` is a deprecated alias of `lock --refresh`; it still works but prints a warning.
+
 ## `nimble refresh`
 
 The `refresh` command is used to fetch and update the list of Nimble packages.
@@ -215,7 +272,7 @@ Which packages that covers depends on where you run it:
 * **Outside a package**, or with `-g` / `--global` — every package Nimble knows about globally: those installed in the global package directory, plus every package already in its version cache.
 
 `nimble refresh` only updates what Nimble knows is available.
-It picks no versions, writes no lock file and installs nothing, so it is safe to run at any time; use `nimble install`, `nimble lock` or `nimble upgrade` afterwards to actually act on what it found.
+It picks no versions, writes no lock file and installs nothing, so it is safe to run at any time; use `nimble install` or `nimble lock --refresh` afterwards to actually act on what it found.
 
 Other commands resolve against that cached version information rather than the repositories, which is why a freshly published version can stay invisible to them until the cache is updated.
 Pass `--refresh` to any of them to resolve against the repositories instead:

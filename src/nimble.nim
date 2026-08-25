@@ -630,15 +630,36 @@ proc search(options: Options) =
   if not found:
     display("Error", "No package found.", Error, HighPriority)
 
+proc notFoundError(name: string): ref NimbleError =
+  nimbleError("Package '$1' not found." % name,
+              "Use `nimble search $1` to look for packages by name or tag." %
+                name)
+
 proc list(options: Options) =
   if needsRefresh(options):
     raise nimbleError("Please run nimble refresh.")
   let pkgList = waitFor getPackageList(options)
-  for pkg in pkgList:
+
+  proc echoEntry(pkg: Package) =
     echoPackage(pkg)
     if pkg.alias.len == 0 and options.action.showListVersions:
       echoPackageVersions(pkg)
     echo(" ")
+
+  if options.action.packageNames.len == 0:
+    for pkg in pkgList:
+      echoEntry(pkg)
+    return
+
+  # Named lookup: exact (case insensitive) name matches only, so that
+  # `nimble list foo --ver` queries a single remote instead of every package
+  # whose name or tags happen to contain "foo" (#1825).
+  for name in options.action.packageNames:
+    let matches = pkgList.filterIt(cmpIgnoreCase(it.name, name) == 0)
+    if matches.len == 0:
+      raise notFoundError(name)
+    for pkg in matches:
+      echoEntry(pkg)
 
 proc listNimBinaries(options: Options) =
   let nimBininstalledPkgs = getInstalledPkgsMin(options.nimBinariesDir, options)
@@ -674,9 +695,18 @@ proc listInstalled(options: Options) =
   vers.sort(proc (a, b: (string, seq[VersionChecksumTuple])): int =
     cmpIgnoreCase(a[0], b[0]))
 
+  let names = options.action.packageNames
+  if names.len > 0:
+    let installed = vers.keys.toSeq
+    for name in names:
+      if not installed.anyIt(cmpIgnoreCase(it, name) == 0):
+        raise notFoundError(name)
+
   echo("Package list format: \n{PackageName}")
   echo("└── @{Version} ({CheckSum})[Special Versions (if any)] ({InstallPath})")
   for k in keys(vers):
+    if names.len > 0 and not names.anyIt(cmpIgnoreCase(it, k) == 0):
+      continue
     displayFormatted(Message, k)
     displayFormatted(Hint, "\n")
     if options.action.showListVersions:
