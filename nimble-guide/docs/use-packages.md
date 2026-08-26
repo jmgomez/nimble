@@ -132,11 +132,33 @@ Add `--ver` to also query the package's repository for the versions it has tagge
 Because `--ver` contacts each matching package's repository, it is worth naming the packages you care about.
 `nimble list --ver` on its own queries every package Nimble knows about, one at a time.
 
+A name may carry a version range, spelled exactly as it would be in a `requires` line, to narrow the versions reported.
+Giving a range implies `--ver`:
+
+    $ nimble list "chronos >= 4.0.4"
+
+    chronos:
+      url:         https://github.com/status-im/nim-chronos (git)
+      ...
+      versions:    v4.4.0, v4.2.4, v4.2.3, v4.2.2, v4.2.0, v4.0.7, v4.0.6, v4.0.5, v4.0.4
+
+Quote the argument so the shell keeps it as one word.
+Any range accepted in a `requires` line works, including `== 4.2.0` and `>= 4.0.0 & < 4.3.0`.
+A range that matches nothing is not an error — the package is still listed, with a note in place of the versions:
+
+    $ nimble list "chronos >= 99"
+
+    chronos:
+      ...
+      versions:    (No tagged versions match >= 99)
+
+Only tagged releases are matched, so a special version such as `chronos#head` reports no matches: `#head` is a branch, not a tag.
+
 If you want to see a list of locally installed packages and their versions, use `--installed`, or `-i` for short:
 
     $ nimble list -i
 
-This also accepts package names, so `nimble list -i chronos` reports just the installed copies of chronos.
+This also accepts package names and version ranges, so `nimble list -i chronos` reports just the installed copies of chronos, and `nimble list -i "chronos >= 4.0.4"` narrows that to the installed versions in range.
 
 
 

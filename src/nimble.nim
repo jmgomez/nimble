@@ -640,26 +640,29 @@ proc list(options: Options) =
     raise nimbleError("Please run nimble refresh.")
   let pkgList = waitFor getPackageList(options)
 
-  proc echoEntry(pkg: Package) =
+  # A version range only means something alongside the versions themselves, so
+  # giving one implies --ver rather than being silently ignored.
+  proc echoEntry(pkg: Package, verRange: VersionRange) =
     echoPackage(pkg)
-    if pkg.alias.len == 0 and options.action.showListVersions:
-      echoPackageVersions(pkg)
+    if pkg.alias.len == 0 and
+       (options.action.showListVersions or verRange.kind != verAny):
+      echoPackageVersions(pkg, verRange)
     echo(" ")
 
-  if options.action.packageNames.len == 0:
+  if options.action.listPackages.len == 0:
     for pkg in pkgList:
-      echoEntry(pkg)
+      echoEntry(pkg, VersionRange(kind: verAny))
     return
 
   # Named lookup: exact (case insensitive) name matches only, so that
   # `nimble list foo --ver` queries a single remote instead of every package
   # whose name or tags happen to contain "foo" (#1825).
-  for name in options.action.packageNames:
-    let matches = pkgList.filterIt(cmpIgnoreCase(it.name, name) == 0)
+  for pv in options.action.listPackages:
+    let matches = pkgList.filterIt(cmpIgnoreCase(it.name, pv.name) == 0)
     if matches.len == 0:
-      raise notFoundError(name)
+      raise notFoundError(pv.name)
     for pkg in matches:
-      echoEntry(pkg)
+      echoEntry(pkg, pv.ver)
 
 proc listNimBinaries(options: Options) =
   let nimBininstalledPkgs = getInstalledPkgsMin(options.nimBinariesDir, options)
@@ -695,23 +698,33 @@ proc listInstalled(options: Options) =
   vers.sort(proc (a, b: (string, seq[VersionChecksumTuple])): int =
     cmpIgnoreCase(a[0], b[0]))
 
-  let names = options.action.packageNames
-  if names.len > 0:
+  let wanted = options.action.listPackages
+  if wanted.len > 0:
     let installed = vers.keys.toSeq
-    for name in names:
-      if not installed.anyIt(cmpIgnoreCase(it, name) == 0):
-        raise notFoundError(name)
+    for pv in wanted:
+      if not installed.anyIt(cmpIgnoreCase(it, pv.name) == 0):
+        raise notFoundError(pv.name)
 
   echo("Package list format: \n{PackageName}")
   echo("└── @{Version} ({CheckSum})[Special Versions (if any)] ({InstallPath})")
   for k in keys(vers):
-    if names.len > 0 and not names.anyIt(cmpIgnoreCase(it, k) == 0):
-      continue
+    var verRange = VersionRange(kind: verAny)
+    if wanted.len > 0:
+      var matched = false
+      for pv in wanted:
+        if cmpIgnoreCase(pv.name, k) == 0:
+          verRange = pv.ver
+          matched = true
+          break
+      if not matched: continue
+
     displayFormatted(Message, k)
     displayFormatted(Hint, "\n")
-    if options.action.showListVersions:
-      for idx, item in vers[k]:
-        if idx == vers[k].len() - 1:
+    # As in `list`, a version range implies --ver.
+    if options.action.showListVersions or verRange.kind != verAny:
+      let items = vers[k].filterIt(it.version.satisfiesConstraint(verRange))
+      for idx, item in items:
+        if idx == items.len() - 1:
           displayFormatted(Hint, "└── ")
         else:
           displayFormatted(Hint, "├── ")

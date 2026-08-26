@@ -171,6 +171,49 @@ suite "misc tests":
     check output.toLower.contains("packagea")
     check not output.toLower.contains("packagebin2")
 
+  test "list filters versions by a version range (#1825)":
+    # packagea is tagged v0.1, v0.2, v0.3 and v0.5. A range implies --ver,
+    # since asking about versions is the whole point of giving one.
+    usePackageListFile "develop/packages.json":
+      let (output, exitCode) = execNimble("list", "packagea >= 0.3")
+      checkpoint output
+      check exitCode == QuitSuccess
+      check output.contains("packagea:")
+      check output.contains("versions:")
+      check output.contains("v0.5")
+      check output.contains("v0.3")
+      check not output.contains("v0.2")
+      check not output.contains("v0.1")
+
+  test "list with a version range matching nothing lists no versions (#1825)":
+    usePackageListFile "develop/packages.json":
+      let (output, exitCode) = execNimble("list", "packagea >= 99.0")
+      checkpoint output
+      check exitCode == QuitSuccess
+      check output.contains("packagea:")
+      check not output.contains("v0.")
+
+  test "list accepts an exact version as a range (#1825)":
+    usePackageListFile "develop/packages.json":
+      let (output, exitCode) = execNimble("list", "packagea == 0.2")
+      checkpoint output
+      check exitCode == QuitSuccess
+      check output.contains("v0.2")
+      check not output.contains("v0.5")
+
+  test "list -i filters installed versions by a version range (#1825)":
+    check execNimbleYes("install", pkgAUrl).exitCode == QuitSuccess
+
+    let (hit, hitExitCode) = execNimble("list", "-i", "packagea >= 0.4")
+    checkpoint hit
+    check hitExitCode == QuitSuccess
+    check hit.contains("@0.5.0")
+
+    let (miss, missExitCode) = execNimble("list", "-i", "packagea >= 99.0")
+    checkpoint miss
+    check missExitCode == QuitSuccess
+    check not miss.contains("@0.5.0")
+
   test "list -i with a package name that is not installed fails (#1825)":
     let (output, exitCode) = execNimble("list", "-i", "nosuchpackage")
     checkpoint output
