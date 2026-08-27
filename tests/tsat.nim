@@ -2,7 +2,7 @@
 import unittest, os, osproc
 import testscommon
 # from nimblepkg/common import cd, NimbleError Used in the commented tests
-import std/[tables, json, jsonutils, strutils, sequtils, times, options]
+import std/[tables, json, jsonutils, strutils, sequtils, times, options, algorithm]
 import chronos
 import nimblepkg/[version, nimblesat, options, config, packageinfotypes, versiondiscovery, urls, download, declarativeparser]
 from nimblepkg/common import cd, NimbleError
@@ -133,6 +133,102 @@ suite "SAT solver":
     else:
       expect NimbleError:
         discard solvePackages(pkgInfo, @[], pkgsToInstall, options, output, solvedPkgs, nimBin)
+
+  test "URL-keyed discovery versions reach the name node (websock split-brain)":
+    # Mirrors the libp2pconflict failure: libp2p 1.x requires websock by name,
+    # libp2p 2.x by URL. Discovery can end up keying the full version list
+    # under the URL while the name node holds only the newest version. The
+    # older websock (no nimcrypto pin) is the only one compatible with quic's
+    # nimcrypto pin, so this graph only solves if the URL node's versions are
+    # merged into the name node during normalization.
+    const wsUrl = "https://github.com/status-im/nim-websock"
+    var t = {
+      "root": PackageVersions(pkgName: "root", versions: @[
+        PackageMinimalInfo(name: "root", version: newVersion "0.1.0", requires: @[
+          (name: "libp2p", ver: VersionRange(kind: verAny)),
+          (name: "quic", ver: parseVersionRange "#abc")], isRoot: true)]),
+      "libp2p": PackageVersions(pkgName: "libp2p", versions: @[
+        PackageMinimalInfo(name: "libp2p", version: newVersion "1.15.3", requires: @[
+          (name: "websock", ver: parseVersionRange ">= 0.2.1")]),
+        PackageMinimalInfo(name: "libp2p", version: newVersion "2.3.0", requires: @[
+          (name: wsUrl, ver: parseVersionRange ">= 0.4.0")])]),
+      "quic": PackageVersions(pkgName: "quic", versions: @[
+        PackageMinimalInfo(name: "quic", version: newVersion "#abc", requires: @[
+          (name: "nimcrypto", ver: parseVersionRange ">= 0.6.0 & < 0.7.0")])]),
+      "websock": PackageVersions(pkgName: "websock", versions: @[
+        PackageMinimalInfo(name: "websock", version: newVersion "0.4.2", requires: @[
+          (name: "nimcrypto", ver: parseVersionRange ">= 0.7.0")], url: wsUrl)]),
+      wsUrl: PackageVersions(pkgName: wsUrl, versions: @[
+        PackageMinimalInfo(name: "websock", version: newVersion "0.3.0", requires: @[
+          (name: "nimcrypto", ver: VersionRange(kind: verAny))], url: wsUrl),
+        PackageMinimalInfo(name: "websock", version: newVersion "0.4.2", requires: @[
+          (name: "nimcrypto", ver: parseVersionRange ">= 0.7.0")], url: wsUrl)]),
+      "nimcrypto": PackageVersions(pkgName: "nimcrypto", versions: @[
+        PackageMinimalInfo(name: "nimcrypto", version: newVersion "0.6.4"),
+        PackageMinimalInfo(name: "nimcrypto", version: newVersion "0.7.3")]),
+    }.toTable()
+    var opts = initOptions()
+    t.normalizeRequirements(opts)
+    t.normalizeSpecialVersions(opts)
+    var graph = t.toDepGraph()
+    let form = toFormular(graph)
+    var packages = initTable[string, Version]()
+    var output = ""
+    check solve(graph, form, packages, output, initOptions())
+    check packages.getOrDefault("libp2p") == newVersion "1.15.3"
+    check packages.getOrDefault("websock") == newVersion "0.3.0"
+
+  test "a search that exceeds its iteration budget is not reported unsatisfiable":
+    # Regression test for the Aug 2026 CI breakage: this recorded real-world
+    # nimlangserver table IS satisfiable (verified independently), but the
+    # DPLL search overflows its iteration budget under the natural node
+    # order. The overflow must not be conflated with "unsatisfiable";
+    # solve retries under rotated node orders, which decide this instance in
+    # milliseconds.
+    var pkgVersionTable = parseJson(readFile("packageMinimal" / "nimlangserver.json")).jsonTo(Table[string, PackageVersions], Joptions(allowMissingKeys: true))
+    pkgVersionTable.normalizeRequirements(initOptions())
+    var graph = pkgVersionTable.toDepGraph()
+    let form = toFormular(graph)
+    var packages = initTable[string, Version]()
+    var output = ""
+    check solve(graph, form, packages, output, initOptions())
+    check packages.len > 0
+
+  test "findMinimalFailingSet separates implicated deps from unaffected ones":
+    # The conflict is alpha (needs common >= 2.0) vs pin (needs common < 2.0):
+    # removing either of them resolves it, removing filler does not. The
+    # fallback retry pins implicated packages, so the split matters: pinning
+    # a package whose removal changes nothing (like filler, or nim in the
+    # libp2p/quic case) can never fix the solve.
+    var t = {
+      "root": PackageVersions(pkgName: "root", versions: @[
+        PackageMinimalInfo(name: "root", version: newVersion "0.1.0", requires: @[
+          (name: "filler", ver: VersionRange(kind: verAny)),
+          (name: "alpha", ver: VersionRange(kind: verAny)),
+          (name: "pin", ver: parseVersionRange "#abc")], isRoot: true)]),
+      "filler": PackageVersions(pkgName: "filler", versions: @[
+        PackageMinimalInfo(name: "filler", version: newVersion "1.0")]),
+      "alpha": PackageVersions(pkgName: "alpha", versions: @[
+        PackageMinimalInfo(name: "alpha", version: newVersion "2.0", requires: @[
+          (name: "common", ver: parseVersionRange ">= 2.0")])]),
+      "pin": PackageVersions(pkgName: "pin", versions: @[
+        PackageMinimalInfo(name: "pin", version: newVersion "#abc", requires: @[
+          (name: "common", ver: parseVersionRange "< 2.0")])]),
+      "common": PackageVersions(pkgName: "common", versions: @[
+        PackageMinimalInfo(name: "common", version: newVersion "1.0"),
+        PackageMinimalInfo(name: "common", version: newVersion "2.0")]),
+    }.toTable()
+
+    var graph = t.toDepGraph()
+    let form = toFormular(graph)
+    var packages = initTable[string, Version]()
+    var output = ""
+    check not solve(graph, form, packages, output, initOptions())
+
+    var g2 = t.toDepGraph()
+    let (failingSet, implicated, _) = findMinimalFailingSet(g2)
+    check implicated.mapIt(it.name).sorted() == @["alpha", "pin"]
+    check failingSet.mapIt(it.name) == @["filler"]
 
   test "lenient resolves conflicting special versions with warning":
     proc initConflictingSpecialVersionsTable(): Table[string, PackageVersions] =
