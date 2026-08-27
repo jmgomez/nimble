@@ -298,32 +298,89 @@ proc generateUnsatisfiableMessage(g: var DepGraph, f: Form, s: Solution): string
   else:
     return "Dependency resolution failed due to the following conflicts:\n" & conflicts.join("\n")
 
-proc safeSatisfiable(f: Form, s: var Solution): bool =
-  try:
-    if satisfiable(f.f, s):
-      return true
-    else:
-      return false
-  except SatOverflowError:
-    return false
+type SatAttemptOutcome = enum
+  saoSat, saoUnsat, saoOverflow
 
-proc findMinimalFailingSet*(g: var DepGraph): tuple[failingSet: seq[PkgTuple], output: string] =
+proc attemptSatisfiable(f: Form; s: var Solution): SatAttemptOutcome =
+  ## Keeps "ran out of iterations" distinct from a
+  ## definitive "no solution exists": the two must not be conflated, because
+  ## the DPLL search giving up says nothing about the formula.
+  try:
+    if satisfiable(f.f, s): saoSat else: saoUnsat
+  except SatOverflowError:
+    saoOverflow
+
+const MaxSolveRotations = 24
+  ## How many alternative node orderings to try when the SAT search exceeds its
+  ## iteration budget. Each attempt is bounded by the solver's own budget
+  ## (~hundreds of ms), so this caps the extra work at a few seconds.
+
+proc rotatedGraph(g: DepGraph; shift: int): DepGraph =
+  ## Same graph, with the non-root nodes rotated by `shift`. The DPLL search
+  ## branches on variables in formula order, which follows node order, so a
+  ## rotation gives it a genuinely different search tree. Root stays at
+  ## index 0 — consumers rely on that.
+  result = DepGraph(reqs: g.reqs)
+  result.nodes.add g.nodes[0]
+  let n = g.nodes.len - 1
+  for i in 0 ..< n:
+    result.nodes.add g.nodes[1 + ((i + shift) mod n)]
+  for i in 0 ..< result.nodes.len:
+    result.packageToDependency[result.nodes[i].pkgName] = i
+    for ver in result.nodes[i].versions:
+      if ver.url != "":
+        result.packageToDependency[ver.url] = i
+
+proc decideSatisfiable(g0: DepGraph; algorithm: ResolutionAlgorithm;
+                       gUsed: var DepGraph; fUsed: var Form; s: var Solution;
+                       startShift = 0): SatAttemptOutcome =
+  ## Decides satisfiability, retrying under rotated node orders when the
+  ## search overflows its iteration budget: the DPLL search is extremely
+  ## sensitive to variable order, and real dependency graphs that overflow
+  ## under one order are typically solved in milliseconds under another
+  ## (found while chasing the nimlangserver tree, see
+  ## tests/packageMinimal/nimlangserver.json). Returns the first definitive
+  ## outcome, leaving the decisive graph/formula/solution in gUsed/fUsed/s;
+  ## saoOverflow means every attempted ordering ran out of budget.
+  result = saoOverflow
+  for shift in startShift .. min(g0.nodes.len - 1, MaxSolveRotations):
+    var g2 = if shift == 0: g0 else: rotatedGraph(g0, shift)
+    let f2 = toFormular(g2, algorithm)
+    var s2 = createSolution(f2.idgen)
+    let o = attemptSatisfiable(f2, s2)
+    if o == saoOverflow:
+      continue
+    gUsed = g2
+    fUsed = f2
+    s = s2
+    return o
+
+proc findMinimalFailingSet*(g: var DepGraph): tuple[failingSet, implicated: seq[PkgTuple], output: string] =
   var minimalFailingSet: seq[PkgTuple] = @[]
+  var implicated: seq[PkgTuple] = @[]
   let rootNode = g.nodes[0]
   let rootVersion = rootNode.versions[0]
   var allDeps = g.reqs[rootVersion.req].deps
-  
+
   # Try removing one dependency at a time to see if it makes it satisfiable
   for i in 0..<allDeps.len:
     var reducedDeps = allDeps
     reducedDeps.delete(i)
     var tempGraph = g
     tempGraph.reqs[rootVersion.req].deps = reducedDeps
-    let tempForm = toFormular(tempGraph)
-    var tempSolution = createSolution(tempForm.idgen)
-    if not safeSatisfiable(tempForm, tempSolution):
+    var gU: DepGraph
+    var fU: Form
+    var sU: Solution
+    case decideSatisfiable(tempGraph, raMaxVer, gU, fU, sU)
+    of saoSat:
+      # Removing this dependency resolves the conflict, so it is one of the
+      # actual participants — these are the packages worth pinning to an
+      # older version in the fallback retry (e.g. libp2p when a pinned quic
+      # commit is incompatible with the newest libp2p).
+      implicated.add(allDeps[i])
+    of saoUnsat, saoOverflow:
       minimalFailingSet.add(allDeps[i])
-  
+
   # Generate error message
   var output = ""
   if minimalFailingSet.len > 0:
@@ -357,41 +414,54 @@ proc findMinimalFailingSet*(g: var DepGraph): tuple[failingSet: seq[PkgTuple], o
                 output.add(&"\n\t -{req.name} {req.ver}")
                 shownReqs.incl(reqKey)
   
-  (minimalFailingSet, output)
+  (minimalFailingSet, implicated, output)
 
-proc solve*(g: var DepGraph; f: Form, packages: var Table[string, Version], output: var string, 
+proc solve*(g: var DepGraph; f: Form, packages: var Table[string, Version], output: var string,
            triedVersions: var seq[VersionAttempt], options: Options): bool {.instrument.} =
-  let m = f.idgen
-  var s = createSolution(m)
-  if safeSatisfiable(f, s):
-    # output.add analyzeVersionSelection(g, f, s)
+  var fUsed = f
+  var s = createSolution(fUsed.idgen)
+  var outcome = attemptSatisfiable(fUsed, s)
+  if outcome == saoOverflow:
+    # Retry under rotated node orders before concluding anything; adopt the
+    # ordering that produced a definitive answer (see decideSatisfiable).
+    outcome = decideSatisfiable(g, options.resolutionAlgorithm, g, fUsed, s,
+                                startShift = 1)
+  if outcome == saoSat:
+    # output.add analyzeVersionSelection(g, fUsed, s)
     for n in mitems g.nodes:
       if n.isRoot: n.active = true
-    for i in 0 ..< m:
-      if s.isTrue(VarId(i)) and f.mapping.hasKey(VarId i):
-        let m = f.mapping[VarId i]
+    for i in 0 ..< fUsed.idgen:
+      if s.isTrue(VarId(i)) and fUsed.mapping.hasKey(VarId i):
+        let m = fUsed.mapping[VarId i]
         let idx = findDependencyForDep(g, m.pkg)
         g.nodes[idx].active = true
         g.nodes[idx].activeVersion = m.index
 
     for n in items g.nodes:
       for v in items(n.versions):
-        let item = f.mapping[v.v]
+        let item = fUsed.mapping[v.v]
         if s.isTrue(v.v):
           packages[item.pkg] = item.version
           output.add &"{item.pkg}  [x]  {toString item} \n"
         else:
           output.add &"{item.pkg}  [ ]  {toString item} \n"
     return true
-  else:    
+  else:
+    if outcome == saoOverflow:
+      output.add "\nThe dependency search exceeded its iteration budget on " &
+                 "every attempted ordering; the analysis below may be incomplete.\n"
     output.add &"\nFailed to find satisfiable solution (pass: {options.satResult.pass}):\n"
-    output.add analyzeVersionSelection(g, f, s)
-    let (failingSet, errorMsg) = findMinimalFailingSet(g)
-    if failingSet.len > 0:
+    output.add analyzeVersionSelection(g, fUsed, s)
+    let (failingSet, implicated, errorMsg) = findMinimalFailingSet(g)
+    # Pin the packages actually implicated in the conflict (removing them
+    # resolves it), falling back to the failing set when nothing is: pinning a
+    # package whose removal changes nothing cannot fix the solve.
+    let retryCandidates = if implicated.len > 0: implicated else: failingSet
+    if retryCandidates.len > 0:
       var newGraph = g
-      
+
       # Try each failing package
-      for pkg in failingSet:
+      for pkg in retryCandidates:
         let idx = findDependencyForDep(newGraph, pkg.name)
         if idx >= 0:
           let originalVersions = newGraph.nodes[idx].versions
@@ -412,7 +482,7 @@ proc solve*(g: var DepGraph; f: Form, packages: var Table[string, Version], outp
       output.add errorMsg
     else:
       output.add "\n\nFinal error message:\n"  # Add a separator
-      output.add generateUnsatisfiableMessage(g, f, s)
+      output.add generateUnsatisfiableMessage(g, fUsed, s)
     false
 
 
@@ -661,6 +731,26 @@ proc normalizeRequirements*(pkgVersionTable: var Table[string, PackageVersions],
             req.name = newPkgName
             options.satResult.normalizedRequirements[newPkgName] = oldReq
         req.name = req.name.resolveAlias(options)
+
+  # Heal URL/name split-brain: version discovery can key one repo's versions
+  # under both its package name and a URL-form requirement (e.g. libp2p 2.x
+  # requires "https://.../nim-websock >= 0.4.0" while libp2p 1.x requires
+  # "websock >= 0.2.1"), and the two lists can diverge. Requirements were just
+  # normalized to names, so the name node must own every version the URL node
+  # collected — otherwise name-bound ranges see only a subset and solvable
+  # graphs are reported unsatisfiable.
+  var urlKeys: seq[string] = @[]
+  for key in pkgVersionTable.keys:
+    if key.isUrl:
+      urlKeys.add key
+  for key in urlKeys:
+    let vs = pkgVersionTable[key].versions
+    if vs.len == 0:
+      continue
+    let nameKey = vs[0].name.toLowerAscii
+    if nameKey != key and nameKey in pkgVersionTable:
+      for v in vs:
+        pkgVersionTable[nameKey].versions.addVersionUnique v
 
 proc getRootSpecialRequirements(
     pkgVersionTable: Table[string, PackageVersions]): Table[string, Version] =
