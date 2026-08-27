@@ -129,8 +129,9 @@ type
       onlyNimBinaries*: bool
       onlyInstalled*: bool
       showListVersions*: bool
-      packageNames*: seq[string] # Restrict the listing to these packages.
-                                 # Empty means list everything.
+      listPackages*: seq[PkgTuple] # Restrict the listing to these packages.
+                                   # Empty means list everything. A version
+                                   # range narrows the versions shown.
     of actionInit, actionDump:
       projName*: string
       vcsOption*: string
@@ -238,7 +239,10 @@ Commands:
                                   performed by tag and by name.
                [--ver, --version] Queries remote server for package version.
   list         [pkgname, ...]     Lists all packages, or only the named ones
-                                  when package names are given.
+                                  when package names are given. A name may
+                                  carry a version range, spelled as in a
+                                  requires line, to narrow the versions shown
+                                  (implies --ver): nimble list "chronos >= 4.0.4"
                [-i, --installed]  Lists all installed packages.
                [--ver, --version] Also display versions for packages.
                [-n, --nimbinaries]  Lists all installed packages.
@@ -748,7 +752,9 @@ proc parseArgument*(key: string, result: var Options) =
   of actionCompile, actionDoc:
     result.action.file = key
   of actionList:
-    result.action.packageNames.add key
+    # Same spelling as a `requires` line, so `nimble list "chronos >= 4.0.4"`
+    # reads like the dependency it would become.
+    result.action.listPackages.add parseRequires(key)
   of actionPublish:
     result.showHelp = true
   of actionBuild:

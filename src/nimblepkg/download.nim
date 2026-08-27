@@ -1046,15 +1046,25 @@ proc downloadPkgAsync*(url: string, verRange: VersionRange,
     #ideally we should be able to know the version we are downloading upfront
     #as for the constraints we need a way to invalidate the cache entry so it doesnt get outdated
 
-proc echoPackageVersions*(pkg: Package) =
+proc echoPackageVersions*(pkg: Package,
+                          verRange = VersionRange(kind: verAny)) =
   let downMethod = pkg.downloadMethod
   case downMethod
   of DownloadMethod.git:
     try:
       let versions = getTagsListRemote(pkg.url, downMethod).getVersionList()
-      if versions.len > 0:
-        let sortedVersions = toSeq(values(versions))
+      # `satisfiesConstraint` rather than `withinRange`: these are the tags the
+      # remote actually has, so a special requirement must not be reported as
+      # satisfied by every tagged version.
+      var sortedVersions: seq[string] = @[]
+      for ver, tag in versions.pairs:
+        if ver.satisfiesConstraint(verRange):
+          sortedVersions.add tag
+      if sortedVersions.len > 0:
         displayInfoLine("  versions:    ", join(sortedVersions, ", "))
+      elif versions.len > 0:
+        displayInfoLine("  versions:    ",
+                        "(No tagged versions match " & $verRange & ")")
       else:
         displayInfoLine("  versions:    ", "(No versions tagged in the remote repository)")
     except CatchableError:
