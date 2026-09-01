@@ -1,6 +1,7 @@
 import sat/[sat, satvars]
 import version, packageinfotypes, packageinfo, options, tools, cli, common, urls
 import versiondiscovery
+import pubgrubexplain
 import lockfile, declarativeparser, sha1hashes
 
 import compat/[sequtils]
@@ -599,7 +600,22 @@ proc getSolvedPackages*(pkgVersionTable: Table[string, PackageVersions], output:
   let form = toFormular(graph, options.resolutionAlgorithm)
   var packages = initTable[string, Version]()
   var triedVersions: seq[VersionAttempt] = @[]
-  discard solve(graph, form, packages, output, triedVersions, options)
+  if not solve(graph, form, packages, output, triedVersions, options):
+    # SAT found no solution. PubGrub re-solves the same universe to produce
+    # an explanation of *why* - and if it finds a solution instead, one of
+    # the two solvers is wrong, which is worth surfacing loudly.
+    let (foundSolution, explanation) = explainSolveFailure(pkgVersionTable)
+    if explanation.len > 0:
+      if options.verbosity <= LowPriority:
+        # --verbose/--debug: keep the SAT solver's full search dump above.
+        output.add "\n" & explanation & "\n"
+      else:
+        # The explanation is the user-facing error; the search dump is noise.
+        output = "Dependency resolution failed:\n" & explanation & "\n"
+    elif foundSolution:
+      output.add "\nNote: the dependency graph appears solvable (PubGrub found a solution " &
+                 "where the SAT solver did not). This is a solver bug - please report it at " &
+                 "https://github.com/nim-lang/nimble/issues\n"
 
   for pkg, ver in packages:
     let nodeIdx = graph.packageToDependency.getKey(pkg)
