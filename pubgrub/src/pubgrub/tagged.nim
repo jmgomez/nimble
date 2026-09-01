@@ -86,7 +86,7 @@ proc onlyTags*[V, T](tags: seq[T]): TaggedRanges[V, T] =
 proc singleton*[V, T](tv: TaggedVersion[V, T]): TaggedRanges[V, T] =
   case tv.kind
   of tvVersion:
-    TaggedRanges[V, T](line: singleton(tv.version))
+    TaggedRanges[V, T](line: ranges.singleton(tv.version))
   of tvTag:
     TaggedRanges[V, T](line: emptyRange[V](), tags: @[tv.tag])
 

@@ -28,3 +28,5 @@ import ../../pubgrub/tests/tsolver
 import ../../pubgrub/tests/treport
 import ../../pubgrub/tests/tupstream
 import ../../pubgrub/tests/tpackage
+
+import ./ttranslation
