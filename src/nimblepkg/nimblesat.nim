@@ -1399,9 +1399,9 @@ proc repairInconsistentPins(satResult: var SATResult, solution: seq[SolvedPackag
 proc solveLockFileDeps*(satResult: var SATResult, pkgList: seq[PackageInfo], options: Options, nimBin: Option[string]) =
   let lockFile = options.lockFile(satResult.rootPackage.myPath.parentDir())
   let currentRequires = satResult.rootPackage.requires
-  var existingRequires = newSeq[(string, Version)]()
+  var existingRequires = newSeq[(string, string, Version)]()
   for name, dep in lockFile.getLockedDependencies.lockedDepsFor(options):
-    existingRequires.add((name, dep.version))
+    existingRequires.add((name, dep.url, dep.version))
 
   # Check for new requirements not in lock file
   var shouldSolve = false
@@ -1420,7 +1420,11 @@ proc solveLockFileDeps*(satResult: var SATResult, pkgList: seq[PackageInfo], opt
     var found = false
     for existing in existingRequires:
       let existingName = existing[0].resolveAlias(options).toLowerAscii()
-      if currentName == existingName and existing[1].withinRange(current.ver):
+      # match name or url against the lockfile requires
+      let matches =
+        if current.name.isURL: cmpIgnoreCase(current.name, existing[1]) == 0
+        else: currentName == existingName
+      if matches and existing[2].withinRange(current.ver):
         found = true
         break
     if not found:

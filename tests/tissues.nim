@@ -624,3 +624,55 @@ requires "results"
       checkpoint output
       check exitCode == QuitSuccess
       check not output.contains("Package not found in solution")
+  test "issue 1827. Match url requires to lock file properly":
+    let tmpDir = getTempDir() / "tissue_1827"
+    removeDir(tmpDir)
+    createDir(tmpDir)
+    defer:  removeDir(tmpDir)
+    writeFile(tmpDir / "tissue_1827.nimble", """
+version = "0.1.0"
+author = "test"
+description = "test"
+license = "MIT"
+requires "jsony"
+requires "https://github.com/arnetheduck/nim-results"
+""")
+    writeFile(tmpDir / "nimble.lock", """
+{
+  "version": 2,
+  "packages": {
+    "results": {
+      "version": "0.5.1",
+      "vcsRevision": "df8113dda4c2d74d460a8fa98252b0b771bf1f27",
+      "url": "https://github.com/arnetheduck/nim-results",
+      "downloadMethod": "git",
+      "dependencies": ["nim"],
+      "checksums": {"sha1": "a9c011f74bc9ed5c91103917b9f382b12e82a9e7"}
+    },
+    "jsony": {
+      "version": "1.1.4",
+      "vcsRevision": "981f868cfca6e2ccde820cc20bb18d835d283233",
+      "url": "https://github.com/treeform/jsony",
+      "downloadMethod": "git",
+      "dependencies": ["nim"],
+      "checksums": {"sha1": "0b40135953033a217eb163e2a73d1e628216a9aa"}
+    }
+  },
+  "tasks": {}
+}
+""")
+    let nimbleDir = tmpDir / "nimbledir"
+    cd tmpDir:
+      let (output, exitCode) = execNimbleYes(
+        "--nimbleDir:" & nimbleDir, "deps",  "--format:json"
+      )
+      checkpoint output
+      check exitCode == QuitSuccess
+      check output.contains("""
+    "name": "jsony",
+    "version": "@any",
+    "resolvedTo": "1.1.4",
+""")
+
+
+
