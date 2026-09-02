@@ -21,6 +21,7 @@ from nimblepkg/options import defaultLockFileName, defaultDevelopPath, initOptio
 from nimblepkg/developfile import ValidationError, ValidationErrorKind,
   developFileName, getValidationErrorMessage
 from nimblepkg/declarativeparser import extractRequiresInfo, getRequires
+from nimblepkg/checksums import calculateDirSha1Checksum
 
 suite "lock file":
   type
@@ -502,6 +503,65 @@ requires "nim >= 1.5.1"
               lines.inLines(&"Fetching {dep1PkgOriginRepoPath}")
         check lines.inLines(&"Downloading {dep2PkgOriginRepoPath}") or
               lines.inLines(&"Fetching {dep2PkgOriginRepoPath}")
+
+  test "uses the repository URL from the lock file (#1837)":
+    cleanUp()
+    withPkgListFile:
+      initNewNimblePackage(mainPkgOriginRepoPath, mainPkgRepoPath,
+                           @[dep1PkgName])
+
+      # packages.json points dep1 at this repository. Its revision is
+      # deliberately unrelated to the one in the lock file.
+      initNewNimblePackage(dep1PkgOriginRepoPath, dep1PkgRepoPath)
+
+      # The lock file points the same package name at a different repository.
+      # A marker module makes it possible to verify which source was installed.
+      let lockedOrigin = originsDirPath / "locked-dep1"
+      cdNewDir lockedOrigin:
+        initRepo()
+        writeFile(dep1PkgNimbleFileName,
+                  newNimbleFileContent(dep1PkgName, nimbleFileTemplate, @[]))
+        writeFile(dep1PkgName & ".nim", "const fromLockedRepository* = true\n")
+        addFiles(dep1PkgNimbleFileName, dep1PkgName & ".nim")
+        commit("Create locked dep1 fork")
+
+      var lockedRevision: string
+      cd lockedOrigin:
+        lockedRevision = getRepoRevision()
+      let lockedChecksum = calculateDirSha1Checksum(lockedOrigin)
+
+      cd mainPkgRepoPath:
+        writeFile(defaultLockFileName, (%*{
+          "version": 2,
+          "packages": {
+            dep1PkgName: {
+              "version": "0.1.0",
+              "vcsRevision": lockedRevision,
+              "url": lockedOrigin,
+              "downloadMethod": "git",
+              "dependencies": [],
+              "checksums": {"sha1": $lockedChecksum}
+            }
+          },
+          "tasks": {}
+        }).pretty)
+
+        let (output, exitCode) = execNimbleYes("setup", "--debug")
+        checkpoint output
+        check exitCode == QuitSuccess
+        check output.contains(lockedOrigin)
+        check not output.contains(
+          &"Downloading {dep1PkgOriginRepoPath} (")
+        check not output.contains(
+          &"Fetching {dep1PkgOriginRepoPath} (")
+
+        var installedLockedSource = false
+        for kind, path in walkDir(pkgsDir):
+          if kind == pcDir and
+             path.extractFilename.startsWith(dep1PkgName & "-"):
+            installedLockedSource = fileExists(path / (dep1PkgName & ".nim"))
+            break
+        check installedLockedSource
 
   # test "can update already existing lock file":
   #   cleanUp()

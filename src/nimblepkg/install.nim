@@ -13,6 +13,7 @@ type PkgDownloadEntry = object
   ver: Version 
   pv: PkgTuple 
   vcsRevision: Sha1Hash 
+  lockFileDep: Option[LockFileDep]
   isRoot: bool 
   dlInfo: Option[PackageDownloadInfo] # resolved after collectDownloadEntries, before download
   download: Future[void] # set during downloadPkgs; nil if cached or skipped
@@ -381,17 +382,38 @@ proc collectDownloadEntries(satResult: SATResult, pkgsToInstall: seq[(string, Ve
                             options: Options): seq[PkgDownloadEntry] =
   for (name, ver) in pkgsToInstall:
     let verRange = satResult.getVersionRangeFoPkgToInstall(name, ver)
-    let vcsRevision = if name in options.satResult.lockFileVcsRevisions:
-      options.satResult.lockFileVcsRevisions[name]
-    else:
-      notSetSha1Hash
+    let lockFileDep =
+      if name in satResult.lockFileDeps: some(satResult.lockFileDeps[name])
+      else: none(LockFileDep)
+    let vcsRevision =
+      if lockFileDep.isSome: lockFileDep.get.vcsRevision
+      else: notSetSha1Hash
     var pv = (name: name, ver: verRange)
     let isRootPkg = pv.name == rootName and
       (rootName notin installedPkgs.mapIt(it.basicInfo.name) or satResult.rootPackage.hasLockFile(options))
     if not isRootPkg and pv.name in options.satResult.normalizedRequirements:
       pv.name = options.satResult.normalizedRequirements[pv.name]
-    result.add(PkgDownloadEntry(name: name, ver: ver, pv: pv, vcsRevision: vcsRevision,
+    result.add(PkgDownloadEntry(name: name, ver: ver, pv: pv,
+                vcsRevision: vcsRevision, lockFileDep: lockFileDep,
                 isRoot: isRootPkg))
+
+proc getLockFileDownloadInfo(pv: PkgTuple, dep: LockFileDep,
+                             options: Options): PackageDownloadInfo =
+  ## Builds download information directly from the lock entry. In particular,
+  ## this must not call getDownloadInfo: that resolves package names through
+  ## packages.json and can replace the locked repository with an indexed one.
+  let lockedPv = (name: dep.url, ver: pv.ver)
+  if dep.url.isFileURL:
+    return PackageDownloadInfo(meth: none(DownloadMethod), url: dep.url,
+      subdir: "", downloadDir: "", pv: lockedPv,
+      vcsRevision: notSetSha1Hash)
+
+  let (url, metadata) = getUrlData(dep.url)
+  let subdir = metadata.getOrDefault("subdir")
+  PackageDownloadInfo(meth: some(dep.downloadMethod), url: url,
+    subdir: subdir,
+    downloadDir: getCacheDownloadDir(url, pv.ver, options, dep.vcsRevision),
+    pv: lockedPv, vcsRevision: dep.vcsRevision)
 
 proc resolveDownloadInfo(entries: var seq[PkgDownloadEntry], options: Options) =
   for i in 0 ..< entries.len:
@@ -399,6 +421,13 @@ proc resolveDownloadInfo(entries: var seq[PkgDownloadEntry], options: Options) =
       continue
     var pv = entries[i].pv
     var dlInfo: PackageDownloadInfo
+    if entries[i].lockFileDep.isSome and
+       entries[i].lockFileDep.get.url.len > 0:
+      dlInfo = getLockFileDownloadInfo(
+        pv, entries[i].lockFileDep.get, options)
+      entries[i].pv = dlInfo.pv
+      entries[i].dlInfo = some(dlInfo)
+      continue
     try:
       dlInfo = getPackageDownloadInfo(pv, options, doPrompt = true, vcsRevision = entries[i].vcsRevision)
     except CatchableError as e:

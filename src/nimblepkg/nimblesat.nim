@@ -1415,6 +1415,7 @@ proc repairInconsistentPins(satResult: var SATResult, solution: seq[SolvedPackag
 proc solveLockFileDeps*(satResult: var SATResult, pkgList: seq[PackageInfo], options: Options, nimBin: Option[string]) =
   let lockFile = options.lockFile(satResult.rootPackage.myPath.parentDir())
   let currentRequires = satResult.rootPackage.requires
+  satResult.lockFileDeps.clear()
   var existingRequires = newSeq[(string, string, Version)]()
   for name, dep in lockFile.getLockedDependencies.lockedDepsFor(options):
     existingRequires.add((name, dep.url, dep.version))
@@ -1589,7 +1590,10 @@ proc solveLockFileDeps*(satResult: var SATResult, pkgList: seq[PackageInfo], opt
       let requirements = dep.dependencies.mapIt((name: it, ver: VersionRange(kind: verAny)))
       let solvedPkg = SolvedPackage(pkgName: name, version: dep.version, requirements: requirements)
       satResult.solvedPkgs.add(solvedPkg)
-      options.satResult.lockFileVcsRevisions[name] = dep.vcsRevision
+      # Keep the complete locked source for the installer. Resolving only the
+      # package name here would consult packages.json again, which can select a
+      # different repository or reject a package that is not indexed (#1837).
+      satResult.lockFileDeps[name] = dep
       if name.isNim: continue
       let depInfo = satResult.getSolvedPkgFromInstalledPkgs(solvedPkg, options, dep.vcsRevision)
       if depInfo.isSome:

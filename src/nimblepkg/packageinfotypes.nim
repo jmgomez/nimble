@@ -153,7 +153,7 @@ type
     normalizedRequirements*: Table[string, string] #normalized -> old. Some packages are not published as nimble packages, we keep the url for installation.
     pkgVersionTable*: Table[string, PackageVersions]
     gitErrors*: seq[string] # Git errors encountered during package discovery (could be network, auth, etc.)
-    lockFileVcsRevisions*: Table[string, Sha1Hash] # package name -> vcsRevision from lock file, for exact commit matching
+    lockFileDeps*: Table[string, LockFileDep] # package name -> source information from the lock file
 
   PackageDownloadInfo* = object
     meth*: Option[DownloadMethod] #None for file dependencies. File dependencies are not copied over to the cache
@@ -223,7 +223,7 @@ proc initSATResult*(pass: SATPass): SATResult =
     pass: pass, installedPkgs: @[],
     normalizedRequirements: initTable[string, string](),
     gitErrors: @[],
-    lockFileVcsRevisions: initTable[string, Sha1Hash]()
+    lockFileDeps: initTable[string, LockFileDep]()
     )
 
 proc getNimbleFileDir*(pkgInfo: PackageInfo): string =
