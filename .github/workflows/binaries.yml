@@ -30,7 +30,7 @@ jobs:
             triple: i686-linux-musl
             name: linux_x32
             platform: linux/386
-            image: i386/alpine:3.20
+            image: i386/alpine:3.22  # apk nim 2.2.0; 3.20 ships 2.0.4, which chronos >= c662a40 does not compile on
             needsNim: "1"
           - os: linux
             triple: aarch64-linux-musl

@@ -116,7 +116,9 @@ suite "Nim binaries":
       projectRoot = currentSourcePath().parentDir.parentDir
       nimVersionRanges = [
         ("nim ~= 1.6.0", "1.6."),
-        ("nim ~= 2.0.0", "2.0."),
+        # Not `~= 2.0.0`: the tests above install 2.0.4, which the resolver would
+        # then reuse, and chronos >= c662a40 does not compile on Nim <= 2.0.4.
+        ("nim >= 2.0.6 & < 2.1.0", "2.0."),
         ("nim ~= 2.2.0", "2.2."),
       ]
     for (nimRange, expectedPrefix) in nimVersionRanges:
