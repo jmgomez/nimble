@@ -345,10 +345,14 @@ proc downloadFromDownloadInfoAsync*(dlInfo: PackageDownloadInfo, options: Option
                     dlInfo.downloadDir, vcsRevision = dlInfo.vcsRevision, nimBin = nimBin)
       return (downloadRes, dlInfo.meth)
 
+proc getPackageDownloadInfoUnchecked(pv: PkgTuple, options: Options, doPrompt = false): PackageDownloadInfo {.tags: [].} =
+  {.cast(tags: []).}:
+    getPackageDownloadInfo(pv, options, doPrompt)
+
 proc downloadPkgFromUrlAsync*(pv: PkgTuple, options: Options, doPrompt = false, nimBin: Option[string]): Future[(DownloadPkgResult, Option[DownloadMethod])] {.async.} =
   {.cast(raises: [CatchableError]).}:
     ## Async version of downloadPkgFromUrl that downloads from a package URL.
-    let dlInfo = getPackageDownloadInfo(pv, options, doPrompt)
+    let dlInfo = getPackageDownloadInfoUnchecked(pv, options, doPrompt)
     return await downloadFromDownloadInfoAsync(dlInfo, options, nimBin)
 
 proc downloadPkInfoForPvAsync*(pv: PkgTuple, options: Options, doPrompt = false, nimBin: Option[string]): Future[PackageInfo] {.async.} =
@@ -394,7 +398,7 @@ proc downloadMinimalPackageImpl(pv: PkgTuple, options: Options, nimBin: Option[s
       # For name-based discovery, resolve the canonical URL so that
       # normalizeRequirements can match URL-based requirements to this package.
       try:
-        let dlInfo = getPackageDownloadInfo(pv, versionDiscoveryOptions, doPrompt = false)
+        let dlInfo = getPackageDownloadInfoUnchecked(pv, versionDiscoveryOptions, doPrompt = false)
         for r in result.mitems:
           r.url = dlInfo.url
       except CatchableError:
@@ -434,11 +438,15 @@ proc computeDownloadCacheKey*(pv: PkgTuple, options: Options): string =
   if pv.ver.kind == verSpecial:
     result.add "@" & $pv.ver
 
+proc computeDownloadCacheKeyUnchecked(pv: PkgTuple, options: Options): string {.tags: [].} =
+  {.cast(tags: []).}:
+    computeDownloadCacheKey(pv, options)
+
 proc memoizedDownloadMinimal*(pv: PkgTuple, options: Options, nimBin: Option[string],
     fetch: GetPackageMinimal): Future[seq[PackageMinimalInfo]] {.async.} =
   {.cast(raises: [CatchableError]).}:
     ## Memoizes version discovery downloads for the lifetime of a resolution pass.
-    let cacheKey = computeDownloadCacheKey(pv, options)
+    let cacheKey = computeDownloadCacheKeyUnchecked(pv, options)
 
     if downloadCache.hasKey(cacheKey):
       return await downloadCache[cacheKey]
