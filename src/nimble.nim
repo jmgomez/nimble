@@ -336,27 +336,11 @@ proc installNimToPkgs2*(nimPkgInfo: PackageInfo, options: Options, nimBin: Optio
 
     createDir(pkgDestDir)
 
-    # Copy nim files to pkgs2. Nim distributions bundle their own `nimble` next
-    # to `nim`; leave it out. NimScript's `exec` resolves a bare `nimble` from
-    # the directory of the running `nim` before PATH, so a task calling
-    # `nimble ...` would otherwise run that bundled, usually older, nimble
-    # instead of the one executing the task (#1840: 0.20.1 shipped with Nim
-    # 2.2.6 rejected a lock file written by 0.24.1).
+    # Copy nim files to pkgs2
     for kind, path in walkDir(srcDir):
       let destPath = pkgDestDir / path.extractFilename
       if kind == pcDir:
-        if path.extractFilename == "bin":
-          createDir(destPath)
-          for binKind, binPath in walkDir(path):
-            let binName = binPath.extractFilename
-            if binName.splitFile.name == "nimble":
-              continue
-            if binKind == pcDir:
-              copyDir(binPath, destPath / binName)
-            else:
-              copyFile(binPath, destPath / binName)
-        else:
-          copyDir(path, destPath)
+        copyDir(path, destPath)
       else:
         copyFile(path, destPath)
 
@@ -376,6 +360,19 @@ proc installNimToPkgs2*(nimPkgInfo: PackageInfo, options: Options, nimBin: Optio
           let destBinPath = destBinDir / srcBinPath.extractFilename
           if fileExists(destBinPath):
             setFilePermissions(destBinPath, getFilePermissions(srcBinPath))
+
+      # Nim distributions bundle their own `nimble` next to `nim`; drop it from
+      # the copy. NimScript's `exec` resolves a bare `nimble` from the directory
+      # of the running `nim` before PATH, so a task calling `nimble ...` would
+      # otherwise run that bundled, usually older, nimble instead of the one
+      # executing the task (#1840: 0.20.1 shipped with Nim 2.2.6 rejected a lock
+      # file written by 0.24.1). Done here rather than by filtering the copy
+      # above, so `copyDir` keeps handling everything else - notably copying
+      # symlinks as symlinks, which a plain `copyFile` would dereference.
+      for binKind, binPath in walkDir(destBinDir):
+        if binKind in {pcFile, pcLinkToFile} and
+           binPath.extractFilename.splitFile.name == "nimble":
+          removeFile(binPath)
 
   # Return PackageInfo pointing to pkgs2
   result = getPkgInfo(pkgDestDir, options, nimBin, pikRequires)
