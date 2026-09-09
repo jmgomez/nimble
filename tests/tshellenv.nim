@@ -6,6 +6,7 @@
 import unittest, os, osproc, strutils
 import testscommon
 from nimblepkg/common import cd
+from nimblepkg/options import prependNimBinDirToPath
 import std/sequtils
 
 when not defined(windows):
@@ -96,3 +97,18 @@ suite "Shell env":
         check "AssertionDefect" notin output
         # Restore nimbledeps for other tests
         discard execNimble("setup")
+
+  test "the running nimble stays ahead of the selected nim's bin dir on PATH (#1840)":
+    # Nim distributions ship a `nimble` next to `nim`. When nimble puts the
+    # selected nim's bin dir in front of PATH for tasks and hooks, that bundled
+    # (usually older) nimble must not shadow the one that is running, or a
+    # nested `nimble ...` call from a task silently switches versions.
+    let originalPath = getEnv("PATH")
+    defer: putEnv("PATH", originalPath)
+    let nimBinDir = getTempDir() / "nimble_test_1840_nim" / "bin"
+    prependNimBinDirToPath(nimBinDir)
+    let entries = getEnv("PATH").split(separator)
+    check entries[0] == getAppDir()
+    check entries[1] == nimBinDir
+    check entries[2 .. ^1].join(separator) == originalPath
+

@@ -594,6 +594,18 @@ proc thereIsNimbleFile*(options: Options): bool =
     return false
   return findNimbleFile(cwd, error = false, options, warn = false) != ""
 
+proc prependNimBinDirToPath*(nimBinDir: string) =
+  ## Puts the selected nim's `bin` directory in front of PATH so subprocesses
+  ## (tasks, hooks, `exec`) pick that nim up. Nim distributions ship their own
+  ## `nimble` next to `nim`, so the running nimble's directory goes in front of
+  ## it: otherwise anything resolving `nimble` through PATH (shells,
+  ## `cmd /c ...`) gets the bundled - usually older - one (#1840).
+  ##
+  ## This does not cover NimScript's `exec`: it looks in the running nim's own
+  ## directory before PATH, which is why `installNimToPkgs2` leaves the bundled
+  ## nimble out of nimble-managed nim installs altogether.
+  putEnv("PATH", getAppDir() & PathSep & nimBinDir & PathSep & getEnv("PATH"))
+
 proc setNimbleDir*(options: var Options) =
   var
     nimbleDir = options.config.nimbleDir

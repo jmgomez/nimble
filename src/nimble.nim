@@ -361,6 +361,19 @@ proc installNimToPkgs2*(nimPkgInfo: PackageInfo, options: Options, nimBin: Optio
           if fileExists(destBinPath):
             setFilePermissions(destBinPath, getFilePermissions(srcBinPath))
 
+      # Nim distributions bundle their own `nimble` next to `nim`; drop it from
+      # the copy. NimScript's `exec` resolves a bare `nimble` from the directory
+      # of the running `nim` before PATH, so a task calling `nimble ...` would
+      # otherwise run that bundled, usually older, nimble instead of the one
+      # executing the task (#1840: 0.20.1 shipped with Nim 2.2.6 rejected a lock
+      # file written by 0.24.1). Done here rather than by filtering the copy
+      # above, so `copyDir` keeps handling everything else - notably copying
+      # symlinks as symlinks, which a plain `copyFile` would dereference.
+      for binKind, binPath in walkDir(destBinDir):
+        if binKind in {pcFile, pcLinkToFile} and
+           binPath.extractFilename.splitFile.name == "nimble":
+          removeFile(binPath)
+
   # Return PackageInfo pointing to pkgs2
   result = getPkgInfo(pkgDestDir, options, nimBin, pikRequires)
   result.basicInfo.checksum = nimChecksum
@@ -2126,8 +2139,7 @@ proc solvePkgs(rootPackage: PackageInfo, options: var Options, nimBin: var Optio
       else:
         raise nimbleError("Trying to use nim from $1 " % nimPkgInfo.getRealDir,
                           "If you are using develop mode nim make sure to compile it.")
-    let separator = when defined(windows): ";" else: ":"
-    putEnv("PATH", nimPkgInfo.getRealDir / "bin" & separator & getEnv("PATH"))
+    prependNimBinDirToPath(nimPkgInfo.getRealDir / "bin")
   display("Info:", "using $1 for compilation" % resolvedNimBin, priority = HighPriority)
   options.satResult.nimResolved = resolvedNim #TODO maybe we should consider the sat fallback pass. Not sure if we should just warn the user so the packages are corrected
   options.satResult.pkgs.incl(nimPkgInfo) #Make sure its in the solution

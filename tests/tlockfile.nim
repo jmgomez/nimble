@@ -1389,3 +1389,36 @@ requires "checksums >= 0.1.0"
 
     # Cleanup
     removeDir(testDir)
+
+  test "package checksum ignores an unrelated parent repository":
+    # A package directory can sit inside a git repository that does not track
+    # it - a package cache under a `$HOME` kept as a dotfiles repo, a vendored
+    # copy dropped into a checkout. There `git ls-files` succeeds and prints
+    # nothing, which is not the same as "this package has no files": the empty
+    # listing used to be hashed as the empty string, so every such package got
+    # the checksum da39a3ee... and lock files stopped being reproducible
+    # between machines.
+    let testDir = getTempDir() / "nimble_test_1840"
+    removeDir(testDir)
+    defer: removeDir(testDir)
+
+    proc writePackage(dir: string) =
+      createDir(dir / "src")
+      writeFile(dir / "pkg.nimble", "version = \"0.1.0\"\n")
+      writeFile(dir / "src" / "pkg.nim", "const answer* = 42\n")
+
+    # The very same content, once nested in a foreign repository and once not.
+    let nestedInRepo = testDir / "foreign" / "nested" / "pkg"
+    createDir(testDir / "foreign")
+    cd testDir / "foreign":
+      discard tryDoCmdEx("git init")
+    writePackage(nestedInRepo)
+
+    let standalone = testDir / "standalone" / "pkg"
+    writePackage(standalone)
+
+    let nestedChecksum = calculateDirSha1Checksum(nestedInRepo)
+
+    # sha1 of no input at all - what hashing the empty listing produced.
+    check $nestedChecksum != "da39a3ee5e6b4b0d3255bfef95601890afd80709"
+    check nestedChecksum == calculateDirSha1Checksum(standalone)

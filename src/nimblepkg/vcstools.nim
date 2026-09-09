@@ -254,9 +254,19 @@ proc getPackageFileList*(dir: Path): seq[string] =
     # Fall back to filesystem listing
     return dir.getPackageFileListWithoutVcs
 
+  # An empty listing means the VCS knows about `dir` but tracks no file in it.
+  # That happens whenever `dir` sits inside an unrelated repository - a package
+  # cache under a `$HOME` that is itself a git repo (dotfiles), a vendored copy
+  # dropped into a checkout - where `git ls-files` succeeds and prints nothing
+  # instead of failing, so the `except` above never fires. Splitting "" yields
+  # @[""], which hashes the empty string and gives every such package the same
+  # bogus checksum (da39a3ee...), making lock files non-reproducible across
+  # machines. A package directory always has files, so fall back to the file
+  # system instead. Found while investigating #1840.
+  let strippedOutput = output.strip
   return
-    if output != noVcsOutput:
-      output.strip.splitLines
+    if output != noVcsOutput and strippedOutput.len > 0:
+      strippedOutput.splitLines
     else:
       dir.getPackageFileListWithoutVcs
 

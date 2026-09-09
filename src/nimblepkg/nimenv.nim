@@ -192,9 +192,8 @@ proc useNimFromDir*(options: var Options, realDir: string, v: VersionRange, tryC
                         "If you are using develop mode nim make sure to compile it.")
 
   options.nimBin = some makeNimBin(options, nim)
-  let separator = when defined(windows): ";" else: ":"
 
-  putEnv("PATH", realDir / "bin" & separator & getEnv("PATH"))
+  prependNimBinDirToPath(realDir / "bin")
   if fileExists:
     display("Info:", "switching to $1 for compilation" % options.nim, priority = HighPriority)
   else:
