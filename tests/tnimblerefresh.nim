@@ -40,6 +40,30 @@ suite "nimble refresh":
       check inLines(lines, "404")
       check inLines(lines, "Package list downloaded.")
 
+  test "a mirror that cannot be reached does not abort the refresh (#1845)":
+    # chronos raises HttpConnectionError for DNS/TCP/TLS-level failures. Nimble
+    # used to re-raise it on the spot, claiming a certificate problem, so the
+    # remaining mirrors were never tried. `.invalid` is reserved by RFC 2606 and
+    # never resolves, which produces a connection-level failure - unlike the
+    # 404/bad-JSON mirrors above, which fail at the HTTP level.
+    testRefresh():
+      writeFile(configFile, """
+        [PackageList]
+        name = "official"
+        url = "https://nimble-1845.invalid/packages.json"
+        url = "https://raw.githubusercontent.com/nim-lang/packages/master/packages.json"
+      """.unindent)
+
+      let (output, exitCode) = execNimble(["refresh", "--verbose"])
+      checkpoint(output)
+      let lines = output.strip.processOutput()
+      check exitCode == QuitSuccess
+      # The unreachable mirror is reported for what it is ...
+      check not output.contains("Failed to verify the SSL certificate")
+      # ... and the next one is still tried.
+      check inLines(lines, "raw.githubusercontent.com/nim-lang/packages")
+      check inLines(lines, "Package list downloaded.")
+
   test "can refresh with local package list":
     testRefresh():
       writeFile(configFile, """
