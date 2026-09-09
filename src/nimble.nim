@@ -336,11 +336,27 @@ proc installNimToPkgs2*(nimPkgInfo: PackageInfo, options: Options, nimBin: Optio
 
     createDir(pkgDestDir)
 
-    # Copy nim files to pkgs2
+    # Copy nim files to pkgs2. Nim distributions bundle their own `nimble` next
+    # to `nim`; leave it out. NimScript's `exec` resolves a bare `nimble` from
+    # the directory of the running `nim` before PATH, so a task calling
+    # `nimble ...` would otherwise run that bundled, usually older, nimble
+    # instead of the one executing the task (#1840: 0.20.1 shipped with Nim
+    # 2.2.6 rejected a lock file written by 0.24.1).
     for kind, path in walkDir(srcDir):
       let destPath = pkgDestDir / path.extractFilename
       if kind == pcDir:
-        copyDir(path, destPath)
+        if path.extractFilename == "bin":
+          createDir(destPath)
+          for binKind, binPath in walkDir(path):
+            let binName = binPath.extractFilename
+            if binName.splitFile.name == "nimble":
+              continue
+            if binKind == pcDir:
+              copyDir(binPath, destPath / binName)
+            else:
+              copyFile(binPath, destPath / binName)
+        else:
+          copyDir(path, destPath)
       else:
         copyFile(path, destPath)
 
@@ -2126,8 +2142,7 @@ proc solvePkgs(rootPackage: PackageInfo, options: var Options, nimBin: var Optio
       else:
         raise nimbleError("Trying to use nim from $1 " % nimPkgInfo.getRealDir,
                           "If you are using develop mode nim make sure to compile it.")
-    let separator = when defined(windows): ";" else: ":"
-    putEnv("PATH", nimPkgInfo.getRealDir / "bin" & separator & getEnv("PATH"))
+    prependNimBinDirToPath(nimPkgInfo.getRealDir / "bin")
   display("Info:", "using $1 for compilation" % resolvedNimBin, priority = HighPriority)
   options.satResult.nimResolved = resolvedNim #TODO maybe we should consider the sat fallback pass. Not sure if we should just warn the user so the packages are corrected
   options.satResult.pkgs.incl(nimPkgInfo) #Make sure its in the solution
