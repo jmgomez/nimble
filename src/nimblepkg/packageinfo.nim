@@ -138,6 +138,7 @@ proc fetchList*(list: PackageList, options: Options) {.async.} =
 
   var
     lastError = ""
+    lastErrorHint = ""
     copyFromPath = ""
   if list.urls.len > 0:
     for i in 0 ..< list.urls.len:
@@ -179,13 +180,24 @@ proc fetchList*(list: PackageList, options: Options) {.async.} =
         finally:
           await session.closeWait()
       except HttpConnectionError:
-        let message = "Failed to verify the SSL certificate for " & url
-        raise nimbleError(message, "Use --noSSLCheck to ignore this error.")
+        # chronos raises HttpConnectionError for every connection-level failure:
+        # DNS resolution, TCP connect, a connect timeout, a proxy failure and a
+        # TLS handshake error all land here. Only some of those are certificate
+        # problems, so report the reason chronos gives rather than asserting
+        # one, and carry on to the remaining mirrors like any other failure -
+        # aborting here left the other mirrors untried. See issue #1845.
+        let message = "Could not download: " & getCurrentExceptionMsg()
+        display("Warning:", message, Warning)
+        lastError = message
+        lastErrorHint = "If this is a certificate problem, " &
+                        "use --noSSLCheck to ignore it."
+        continue
 
       except:
         let message = "Could not download: " & getCurrentExceptionMsg()
         display("Warning:", message, Warning)
         lastError = message
+        lastErrorHint = ""
         continue
 
       if not validatePackagesList(tempPath):
@@ -210,7 +222,7 @@ proc fetchList*(list: PackageList, options: Options) {.async.} =
     if list.name == "local":
       display("Warning:", lastError & ", discarding.", Warning)
     else:
-      raise nimbleError("Refresh failed\n" & lastError)
+      raise nimbleError("Refresh failed\n" & lastError, lastErrorHint)
 
   if copyFromPath.len > 0:
     copyFile(copyFromPath,
